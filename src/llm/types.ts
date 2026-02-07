@@ -17,6 +17,7 @@ export interface ChatResponse {
   functionCalls?: Array<{
     name: string;
     args: Record<string, unknown>;
+    thoughtSignature?: string;
   }>;
   usage?: {
     inputTokens: number;

@@ -63,6 +63,7 @@ function toGeminiContents(messages: ChatMessage[]): Content[] {
           role: "model",
           parts: msg.functionCalls.map((fc) => ({
             functionCall: { name: fc.name, args: fc.args },
+            ...(fc.thoughtSignature ? { thoughtSignature: fc.thoughtSignature } : {}),
           })),
         };
       }
@@ -123,7 +124,7 @@ export function createGeminiClient(
             ? [{ functionDeclarations: toGeminiFunctionDeclarations(params.tools) }]
             : undefined,
           generationConfig: {
-            temperature: params.temperature ?? 0.7,
+            temperature: params.temperature ?? 0,
             maxOutputTokens: params.maxTokens ?? 8192,
             ...(params.thinkingBudget
               ? { thinkingConfig: { thinkingBudget: params.thinkingBudget } as any }
@@ -170,6 +171,7 @@ export function createGeminiClient(
             functionCalls.push({
               name: part.functionCall.name,
               args: (part.functionCall.args as Record<string, unknown>) ?? {},
+              ...((part as any).thoughtSignature ? { thoughtSignature: (part as any).thoughtSignature } : {}),
             });
           }
         }

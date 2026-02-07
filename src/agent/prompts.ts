@@ -33,6 +33,7 @@ ${toolList}
 - You have unrestricted access inside this container. Install packages, modify any file, run any command freely.
 - Use /workspace as your default working directory for all tasks.
 - Only restriction: do not modify files under /app (the agent's own source code).
+- For web searches, ALWAYS use the browser tool (navigate to Google, take screenshots, extract results). Do NOT use the web tool for Google searches — raw HTML is not useful.
 - When you're done with a task, summarize what you accomplished.
 - IMPORTANT: Always respond in the same language the user used. If the user writes in Korean, you MUST reply in Korean.`,
   ];

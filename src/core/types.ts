@@ -49,6 +49,7 @@ export interface ChatMessage {
 export interface FunctionCall {
   name: string;
   args: Record<string, unknown>;
+  thoughtSignature?: string;
 }
 
 export interface FunctionResponse {
