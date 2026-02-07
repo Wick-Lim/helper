@@ -81,6 +81,26 @@ async function sendPhoto(chatId: number, base64: string, mimeType: string): Prom
   await fetch(`${api}/sendPhoto`, { method: "POST", body: form });
 }
 
+async function sendFile(chatId: number, filePath: string, mimeType: string): Promise<void> {
+  const file = Bun.file(filePath);
+  const buffer = await file.arrayBuffer();
+  const fileName = filePath.split("/").pop() || "file";
+  const blob = new Blob([buffer], { type: mimeType });
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+
+  if (mimeType.startsWith("video/")) {
+    form.append("video", blob, fileName);
+    await fetch(`${api}/sendVideo`, { method: "POST", body: form });
+  } else if (mimeType.startsWith("audio/")) {
+    form.append("audio", blob, fileName);
+    await fetch(`${api}/sendAudio`, { method: "POST", body: form });
+  } else {
+    form.append("document", blob, fileName);
+    await fetch(`${api}/sendDocument`, { method: "POST", body: form });
+  }
+}
+
 async function handleMessage(chatId: number, text: string, images?: ImageData[]): Promise<void> {
   const sessionId = `telegram-${chatId}`;
 
@@ -101,6 +121,12 @@ async function handleMessage(chatId: number, text: string, images?: ImageData[])
           if (event.result?.images) {
             for (const img of event.result.images) {
               await sendPhoto(chatId, img.data, img.mimeType);
+            }
+          }
+          // Send files (video, audio, documents)
+          if (event.result?.files) {
+            for (const f of event.result.files) {
+              await sendFile(chatId, f.path, f.mimeType);
             }
           }
           // Keep typing indicator alive during tool execution

@@ -9,14 +9,14 @@ const fileTool: Tool = {
   declaration: {
     name: "file",
     description:
-      "Read, write, append, list, or delete files anywhere in the container.",
+      "Read, write, append, list, delete, or send files. Use 'send' action to deliver files (video, audio, documents) to the user via Telegram.",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
           description: "The file operation to perform",
-          enum: ["read", "write", "append", "list", "delete", "exists", "stat"],
+          enum: ["read", "write", "append", "list", "delete", "exists", "stat", "send"],
         },
         path: {
           type: "string",
@@ -105,6 +105,27 @@ const fileTool: Tool = {
               size: file.size,
               type: file.type,
             }),
+          };
+        }
+
+        case "send": {
+          const file = Bun.file(filePath);
+          if (!(await file.exists())) {
+            return { success: false, output: "", error: `File not found: ${filePath}` };
+          }
+          const ext = filePath.split(".").pop()?.toLowerCase() || "";
+          const mimeMap: Record<string, string> = {
+            mp4: "video/mp4", webm: "video/webm", avi: "video/x-msvideo", mkv: "video/x-matroska", mov: "video/quicktime",
+            mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",
+            pdf: "application/pdf", zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
+            png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+            json: "application/json", csv: "text/csv", txt: "text/plain",
+          };
+          const mimeType = mimeMap[ext] || "application/octet-stream";
+          return {
+            success: true,
+            output: `File ready to send: ${filePath} (${mimeType}, ${file.size} bytes)`,
+            files: [{ path: filePath, mimeType }],
           };
         }
 

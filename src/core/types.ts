@@ -6,12 +6,18 @@ export interface ImageData {
   id?: string;       // filename for HTTP serving
 }
 
+export interface FileAttachment {
+  path: string;
+  mimeType: string;
+}
+
 export interface ToolResult {
   success: boolean;
   output: string;
   error?: string;
   executionTime?: number;
   images?: ImageData[];
+  files?: FileAttachment[];
 }
 
 export interface ToolParameter {
