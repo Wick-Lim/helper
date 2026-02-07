@@ -34,7 +34,7 @@ RUN mkdir -p /workspace /data /data/screenshots /tmp/agent
 VOLUME ["/workspace", "/data"]
 
 ENV GEMINI_API_KEY=""
-ENV GEMINI_MODEL="gemini-2.5-flash"
+ENV GEMINI_MODEL="gemini-3-flash-preview"
 
 EXPOSE 3000
 

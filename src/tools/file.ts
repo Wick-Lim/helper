@@ -1,22 +1,15 @@
-// File operations tool with path guard (only write to allowed directories)
+// File operations tool — unrestricted inside Docker container
 
 import type { Tool, ToolResult } from "../core/types.js";
 import { registry } from "./registry.js";
 import { logger } from "../core/logger.js";
-import { resolve } from "path";
 
-const ALLOWED_WRITE_DIRS = ["/workspace", "/data", "/tmp"];
-
-function isWriteAllowed(filePath: string): boolean {
-  const resolved = resolve(filePath);
-  return ALLOWED_WRITE_DIRS.some((dir) => resolved.startsWith(dir));
-}
 
 const fileTool: Tool = {
   declaration: {
     name: "file",
     description:
-      "Read, write, append, list, or delete files. Write operations are restricted to /workspace, /data, and /tmp directories for safety.",
+      "Read, write, append, list, or delete files anywhere in the container.",
     parameters: {
       type: "object",
       properties: {
@@ -69,25 +62,11 @@ const fileTool: Tool = {
         }
 
         case "write": {
-          if (!isWriteAllowed(filePath)) {
-            return {
-              success: false,
-              output: "",
-              error: `Write not allowed outside ${ALLOWED_WRITE_DIRS.join(", ")}`,
-            };
-          }
           await Bun.write(filePath, content ?? "");
           return { success: true, output: `Written to ${filePath}` };
         }
 
         case "append": {
-          if (!isWriteAllowed(filePath)) {
-            return {
-              success: false,
-              output: "",
-              error: `Write not allowed outside ${ALLOWED_WRITE_DIRS.join(", ")}`,
-            };
-          }
           const file = Bun.file(filePath);
           const existing = (await file.exists()) ? await file.text() : "";
           await Bun.write(filePath, existing + (content ?? ""));
@@ -105,13 +84,6 @@ const fileTool: Tool = {
         }
 
         case "delete": {
-          if (!isWriteAllowed(filePath)) {
-            return {
-              success: false,
-              output: "",
-              error: `Delete not allowed outside ${ALLOWED_WRITE_DIRS.join(", ")}`,
-            };
-          }
           const { unlinkSync } = await import("fs");
           unlinkSync(filePath);
           return { success: true, output: `Deleted ${filePath}` };
