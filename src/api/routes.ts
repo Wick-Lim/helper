@@ -1,0 +1,214 @@
+// API route handlers
+
+import { runAgent } from "../agent/agent.js";
+import { registry } from "../tools/registry.js";
+import * as tasks from "../db/tasks.js";
+import * as config from "../db/config.js";
+import { DEFAULTS } from "../db/config.js";
+import * as memory from "../db/memory.js";
+import { getLLM, getCorsHeaders } from "./server.js";
+import { randomUUID } from "crypto";
+import { readFileSync, existsSync } from "fs";
+import type { AgentEvent } from "../core/types.js";
+
+const MAX_CONCURRENT_CHATS = 3;
+const HEARTBEAT_INTERVAL_MS = 15_000;
+const SCREENSHOT_DIR = "/data/screenshots";
+
+let activeChatCount = 0;
+
+export function getActiveChatCount(): number {
+  return activeChatCount;
+}
+
+function json(data: unknown, status: number = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** Strip base64 image data, replace with serving URL */
+function sanitizeEvent(event: AgentEvent): Record<string, unknown> {
+  if (event.type === "tool_result" && event.result.images?.length) {
+    const sanitizedImages = event.result.images.map((img) => ({
+      mimeType: img.mimeType,
+      size: Math.ceil((img.data.length * 3) / 4),
+      url: img.id ? `/api/images/${img.id}` : undefined,
+    }));
+    return {
+      type: event.type,
+      name: event.name,
+      result: {
+        success: event.result.success,
+        output: event.result.output,
+        error: event.result.error,
+        executionTime: event.result.executionTime,
+        images: sanitizedImages,
+      },
+    };
+  }
+  return event as unknown as Record<string, unknown>;
+}
+
+export async function handleRequest(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const path = url.pathname;
+  const method = req.method;
+
+  // GET routes
+  if (method === "GET") {
+    if (path === "/health") return json({ status: "ok" });
+    if (path === "/api/tools") return json(registry.getDeclarations());
+    if (path === "/api/config") return json(config.getAll());
+
+    if (path === "/api/memory") {
+      const query = url.searchParams.get("q");
+      return json(query ? memory.searchMemory(query) : memory.listMemory());
+    }
+
+    // GET /api/images/:filename
+    const imageMatch = path.match(/^\/api\/images\/([a-f0-9-]+\.jpg)$/);
+    if (imageMatch) {
+      return serveImage(imageMatch[1]);
+    }
+
+    const sessionsMatch = path.match(/^\/api\/sessions\/([^/]+)\/(history|tasks)$/);
+    if (sessionsMatch) {
+      const sessionId = sessionsMatch[1];
+      return sessionsMatch[2] === "history"
+        ? json(tasks.getConversationHistory(sessionId))
+        : json(tasks.getRecentTasks(sessionId));
+    }
+
+    return json({ error: "Not found" }, 404);
+  }
+
+  // POST /api/chat
+  if (method === "POST" && path === "/api/chat") {
+    return handleChat(req);
+  }
+
+  // PUT /api/config/:key
+  if (method === "PUT") {
+    const configMatch = path.match(/^\/api\/config\/([^/]+)$/);
+    if (configMatch) return handleConfigUpdate(req, configMatch[1]);
+  }
+
+  return json({ error: "Not found" }, 404);
+}
+
+function serveImage(filename: string): Response {
+  const filepath = `${SCREENSHOT_DIR}/${filename}`;
+  if (!existsSync(filepath)) {
+    return json({ error: "Image not found" }, 404);
+  }
+
+  const data = readFileSync(filepath);
+  return new Response(data, {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+}
+
+async function handleChat(req: Request): Promise<Response> {
+  // Concurrency guard
+  if (activeChatCount >= MAX_CONCURRENT_CHATS) {
+    return json({ error: "Too many concurrent chat requests", limit: MAX_CONCURRENT_CHATS }, 429);
+  }
+
+  let body: { message?: string; sessionId?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const message = body.message;
+  if (!message || typeof message !== "string") {
+    return json({ error: "\"message\" field is required" }, 400);
+  }
+
+  const sessionId = body.sessionId ?? randomUUID();
+  const llm = getLLM();
+  const corsHeaders = getCorsHeaders();
+  const abortSignal = req.signal;
+
+  activeChatCount++;
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      const send = (event: string, data: unknown) => {
+        controller.enqueue(
+          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+        );
+      };
+
+      // Heartbeat to keep connection alive through proxies
+      const heartbeat = setInterval(() => {
+        if (abortSignal.aborted) return;
+        try {
+          controller.enqueue(encoder.encode(": heartbeat\n\n"));
+        } catch {
+          // Stream already closed
+        }
+      }, HEARTBEAT_INTERVAL_MS);
+
+      try {
+        send("session", { sessionId });
+
+        for await (const event of runAgent(message, { llm, sessionId, signal: abortSignal })) {
+          if (abortSignal.aborted) break;
+          send(event.type, sanitizeEvent(event));
+        }
+      } catch (err) {
+        if (!abortSignal.aborted) {
+          const msg = err instanceof Error ? err.message : String(err);
+          send("error", { type: "error", error: msg });
+        }
+      } finally {
+        clearInterval(heartbeat);
+        activeChatCount--;
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+const VALID_CONFIG_KEYS = new Set(Object.keys(DEFAULTS));
+
+async function handleConfigUpdate(req: Request, key: string): Promise<Response> {
+  if (!VALID_CONFIG_KEYS.has(key)) {
+    return json(
+      { error: `Unknown config key: "${key}"`, validKeys: [...VALID_CONFIG_KEYS] },
+      400
+    );
+  }
+
+  let body: { value?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (body.value === undefined || typeof body.value !== "string") {
+    return json({ error: "\"value\" field (string) is required" }, 400);
+  }
+
+  config.set(key, body.value);
+  return json({ ok: true });
+}

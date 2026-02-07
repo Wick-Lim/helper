@@ -1,0 +1,19 @@
+{
+  "name": "agentic-os",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "test": "bun test tests/",
+    "test:ci": "bun test tests/ --timeout 600000",
+    "build": "bun build --target=bun --outfile=dist/index.js src/index.ts"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "puppeteer-core": "^24.2.0"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.8"
+  }
+}
