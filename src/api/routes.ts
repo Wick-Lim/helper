@@ -7,6 +7,8 @@ import * as config from "../db/config.js";
 import { DEFAULTS } from "../db/config.js";
 import * as memory from "../db/memory.js";
 import { getLLM, getCorsHeaders } from "./server.js";
+import { getAllApiUsage } from "../core/ratelimit.js";
+import { getBrowserStats } from "../tools/browser.js";
 import { randomUUID } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import type { AgentEvent } from "../core/types.js";
@@ -58,9 +60,11 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // GET routes
   if (method === "GET") {
-    if (path === "/health") return json({ status: "ok" });
+    if (path === "/health") return json({ status: "ok", timestamp: new Date().toISOString() });
     if (path === "/api/tools") return json(registry.getDeclarations());
     if (path === "/api/config") return json(config.getAll());
+    if (path === "/api/stats") return handleStats();
+    if (path === "/api/tasks") return json(tasks.getAllTasks());
 
     if (path === "/api/memory") {
       const query = url.searchParams.get("q");
@@ -84,15 +88,40 @@ export async function handleRequest(req: Request): Promise<Response> {
     return json({ error: "Not found" }, 404);
   }
 
-  // POST /api/chat
-  if (method === "POST" && path === "/api/chat") {
-    return handleChat(req);
+  // POST routes
+  if (method === "POST") {
+    // POST /api/chat
+    if (path === "/api/chat") {
+      return handleChat(req);
+    }
+
+    // POST /api/memory
+    if (path === "/api/memory") {
+      return handleCreateMemory(req);
+    }
   }
 
-  // PUT /api/config/:key
+  // PUT routes
   if (method === "PUT") {
+    // PUT /api/config/:key
     const configMatch = path.match(/^\/api\/config\/([^/]+)$/);
     if (configMatch) return handleConfigUpdate(req, configMatch[1]);
+
+    // PUT /api/config (batch update)
+    if (path === "/api/config") {
+      return handleConfigBatchUpdate(req);
+    }
+
+    // PUT /api/memory/:id
+    const memoryMatch = path.match(/^\/api\/memory\/(\d+)$/);
+    if (memoryMatch) return handleUpdateMemory(req, parseInt(memoryMatch[1]));
+  }
+
+  // DELETE routes
+  if (method === "DELETE") {
+    // DELETE /api/memory/:id
+    const memoryMatch = path.match(/^\/api\/memory\/(\d+)$/);
+    if (memoryMatch) return handleDeleteMemory(parseInt(memoryMatch[1]));
   }
 
   return json({ error: "Not found" }, 404);
@@ -113,13 +142,25 @@ function serveImage(filename: string): Response {
   });
 }
 
+function handleStats(): Response {
+  const apiUsage = getAllApiUsage();
+  const browserStats = getBrowserStats();
+  
+  return json({
+    ...apiUsage,
+    browser: browserStats,
+    activeChats: activeChatCount,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 async function handleChat(req: Request): Promise<Response> {
   // Concurrency guard
   if (activeChatCount >= MAX_CONCURRENT_CHATS) {
     return json({ error: "Too many concurrent chat requests", limit: MAX_CONCURRENT_CHATS }, 429);
   }
 
-  let body: { message?: string; sessionId?: string };
+  let body: { message?: string; sessionId?: string; images?: Array<{ mimeType: string; data: string }> };
   try {
     body = await req.json();
   } catch {
@@ -161,7 +202,12 @@ async function handleChat(req: Request): Promise<Response> {
       try {
         send("session", { sessionId });
 
-        for await (const event of runAgent(message, { llm, sessionId, signal: abortSignal })) {
+        for await (const event of runAgent(message, { 
+          llm, 
+          sessionId, 
+          signal: abortSignal,
+          images: body.images 
+        })) {
           if (abortSignal.aborted) break;
           send(event.type, sanitizeEvent(event));
         }
@@ -209,6 +255,89 @@ async function handleConfigUpdate(req: Request, key: string): Promise<Response> 
     return json({ error: "\"value\" field (string) is required" }, 400);
   }
 
-  config.set(key, body.value);
-  return json({ ok: true });
+  try {
+    config.set(key, body.value);
+    return json({ ok: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return json({ error: msg }, 400);
+  }
+}
+
+async function handleConfigBatchUpdate(req: Request): Promise<Response> {
+  let body: Record<string, string>;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const results: Array<{ key: string; success: boolean; error?: string }> = [];
+
+  for (const [key, value] of Object.entries(body)) {
+    if (!VALID_CONFIG_KEYS.has(key)) {
+      results.push({ key, success: false, error: "Unknown config key" });
+      continue;
+    }
+
+    try {
+      config.set(key, value);
+      results.push({ key, success: true });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      results.push({ key, success: false, error: msg });
+    }
+  }
+
+  const allSuccess = results.every((r) => r.success);
+  return json({ ok: allSuccess, results }, allSuccess ? 200 : 400);
+}
+
+// Memory CRUD handlers
+async function handleCreateMemory(req: Request): Promise<Response> {
+  let body: { key?: string; value?: string; category?: string; importance?: number };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!body.key || !body.value) {
+    return json({ error: "key and value are required" }, 400);
+  }
+
+  try {
+    memory.setMemory(body.key, body.value, body.category, body.importance);
+    return json({ ok: true }, 201);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return json({ error: msg }, 500);
+  }
+}
+
+async function handleUpdateMemory(req: Request, id: number): Promise<Response> {
+  let body: { key?: string; value?: string; category?: string; importance?: number };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  try {
+    memory.updateMemory(id, body);
+    return json({ ok: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return json({ error: msg }, 500);
+  }
+}
+
+function handleDeleteMemory(id: number): Response {
+  try {
+    memory.deleteMemory(id);
+    return json({ ok: true });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return json({ error: msg }, 500);
+  }
 }

@@ -3,7 +3,7 @@
 import { getDB } from "./index.js";
 import type { MemoryRow } from "../core/types.js";
 
-export function saveMemory(
+export function setMemory(
   key: string,
   value: string,
   category: string = "general",
@@ -21,6 +21,9 @@ export function saveMemory(
     [key, value, category, importance]
   );
 }
+
+// Alias for backwards compatibility
+export const saveMemory = setMemory;
 
 export function getMemory(key: string): MemoryRow | null {
   const db = getDB();
@@ -74,9 +77,55 @@ export function listMemory(category?: string, limit: number = 50): MemoryRow[] {
   ).all(limit) as MemoryRow[];
 }
 
-export function deleteMemory(key: string): boolean {
+// Delete by key
+export function deleteMemoryByKey(key: string): boolean {
   const db = getDB();
   const result = db.run("DELETE FROM memory WHERE key = ?", [key]);
+  return result.changes > 0;
+}
+
+// Delete by ID (for WebUI)
+export function deleteMemory(id: number): boolean {
+  const db = getDB();
+  const result = db.run("DELETE FROM memory WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+// Update memory by ID (for WebUI)
+export function updateMemory(
+  id: number,
+  updates: { key?: string; value?: string; category?: string; importance?: number }
+): boolean {
+  const db = getDB();
+  const sets: string[] = [];
+  const values: (string | number)[] = [];
+
+  if (updates.key !== undefined) {
+    sets.push("key = ?");
+    values.push(updates.key);
+  }
+  if (updates.value !== undefined) {
+    sets.push("value = ?");
+    values.push(updates.value);
+  }
+  if (updates.category !== undefined) {
+    sets.push("category = ?");
+    values.push(updates.category);
+  }
+  if (updates.importance !== undefined) {
+    sets.push("importance = ?");
+    values.push(updates.importance);
+  }
+
+  if (sets.length === 0) return false;
+
+  sets.push("updated_at = datetime('now')");
+  values.push(id);
+
+  const result = db.run(
+    `UPDATE memory SET ${sets.join(", ")} WHERE id = ?`,
+    values
+  );
   return result.changes > 0;
 }
 
@@ -87,7 +136,11 @@ export function buildMemoryContext(query: string): string {
   const lines = memories.map(
     (m) => `[${m.category}] ${m.key}: ${m.value}`
   );
-  return `\n--- Relevant Memories ---\n${lines.join("\n")}\n---\n`;
+  return `
+--- Relevant Memories ---
+${lines.join("\n")}
+---
+`;
 }
 
 export function pruneMemory(maxEntries: number = 1000): number {

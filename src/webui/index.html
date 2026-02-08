@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent WebUI</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .chat-message { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .typing-dot { animation: typing 1.4s infinite; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typing { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-10px); } }
+    .code-block { position: relative; }
+    .copy-btn { position: absolute; top: 8px; right: 8px; opacity: 0; transition: opacity 0.2s; }
+    .code-block:hover .copy-btn { opacity: 1; }
+  </style>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden" x-data="app()" x-init="init()">
+  <div class="flex h-full">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-900 text-white flex flex-col shadow-xl">
+      <div class="p-6 border-b border-gray-800">
+        <h1 class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+          🤖 Agent UI
+        </h1>
+        <p class="text-xs text-gray-400 mt-1">AI Agent Control Panel</p>
+      </div>
+      
+      <nav class="flex-1 p-4 space-y-2">
+        <button @click="currentView = 'chat'" 
+                :class="{'bg-blue-600': currentView === 'chat', 'hover:bg-gray-800': currentView !== 'chat'}"
+                class="w-full text-left px-4 py-3 rounded-lg transition-colors flex items-center gap-3">
+          <span>💬</span> 채팅
+        </button>
+        <button @click="currentView = 'memory'"
+                :class="{'bg-blue-600': currentView === 'memory', 'hover:bg-gray-800': currentView !== 'memory'}"
+                class="w-full text-left px-4 py-3 rounded-lg transition-colors flex items-center gap-3">
+          <span>🧠</span> 메모리
+        </button>
+        <button @click="currentView = 'tasks'"
+                :class="{'bg-blue-600': currentView === 'tasks', 'hover:bg-gray-800': currentView !== 'tasks'}"
+                class="w-full text-left px-4 py-3 rounded-lg transition-colors flex items-center gap-3">
+          <span>📋</span> 작업 로그
+        </button>
+        <button @click="currentView = 'dashboard'"
+                :class="{'bg-blue-600': currentView === 'dashboard', 'hover:bg-gray-800': currentView !== 'dashboard'}"
+                class="w-full text-left px-4 py-3 rounded-lg transition-colors flex items-center gap-3">
+          <span>📊</span> 대시보드
+        </button>
+        <button @click="currentView = 'settings'"
+                :class="{'bg-blue-600': currentView === 'settings', 'hover:bg-gray-800': currentView !== 'settings'}"
+                class="w-full text-left px-4 py-3 rounded-lg transition-colors flex items-center gap-3">
+          <span>⚙️</span> 설정
+        </button>
+      </nav>
+
+      <div class="p-4 border-t border-gray-800">
+        <div class="text-xs text-gray-400 space-y-1">
+          <div class="flex justify-between">
+            <span>상태:</span>
+            <span :class="isConnected ? 'text-green-400' : 'text-red-400'" x-text="isConnected ? '● 연결됨' : '● 연결 끊김'"></span>
+          </div>
+          <div class="flex justify-between">
+            <span>세션:</span>
+            <span class="text-gray-300" x-text="sessionId.substring(0, 8) + '...'"></span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col bg-white overflow-hidden">
+      <!-- Chat View -->
+      <div x-show="currentView === 'chat'" class="flex-1 flex flex-col h-full" x-cloak>
+        <!-- Messages Area -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-4" id="chat-messages" x-ref="chatMessages">
+          <template x-for="(msg, index) in messages" :key="index">
+            <div class="chat-message" :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+              <div :class="msg.role === 'user' ? 'bg-blue-500 text-white max-w-3xl' : 'bg-gray-100 text-gray-800 max-w-4xl'" 
+                   class="rounded-2xl px-6 py-4 shadow-sm">
+                <div class="prose prose-sm max-w-none" :class="msg.role === 'user' ? 'prose-invert' : ''" x-html="renderMarkdown(msg.content)"></div>
+                <div x-show="msg.images && msg.images.length > 0" class="mt-3 space-y-2">
+                  <template x-for="img in msg.images">
+                    <img :src="'data:' + img.mimeType + ';base64,' + img.data" class="rounded-lg max-w-md max-h-64 object-cover">
+                  </template>
+                </div>
+                <div class="text-xs mt-2 opacity-60" x-text="formatTime(msg.timestamp)"></div>
+              </div>
+            </div>
+          </template>
+          
+          <!-- Typing Indicator -->
+          <div x-show="isTyping" class="flex justify-start">
+            <div class="bg-gray-100 rounded-2xl px-6 py-4 flex items-center gap-1">
+              <div class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></div>
+              <div class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></div>
+              <div class="typing-dot w-2 h-2 bg-gray-400 rounded-full"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="border-t border-gray-200 p-4 bg-white">
+          <div class="max-w-4xl mx-auto">
+            <div class="relative">
+              <textarea 
+                x-model="chatInput"
+                @keydown.enter.prevent="if (!event.shiftKey) sendMessage()"
+                placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
+                class="w-full px-4 py-3 pr-32 border border-gray-300 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                rows="3"
+                :disabled="isTyping"
+              ></textarea>
+              <div class="absolute bottom-3 right-3 flex gap-2">
+                <input type="file" @change="handleFileUpload" accept="image/*" class="hidden" x-ref="fileInput">
+                <button @click="$refs.fileInput.click()" 
+                        class="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="이미지 첨부">
+                  📎
+                </button>
+                <button @click="sendMessage()" 
+                        :disabled="!chatInput.trim() || isTyping"
+                        :class="{'opacity-50 cursor-not-allowed': !chatInput.trim() || isTyping, 'hover:bg-blue-600': chatInput.trim() && !isTyping}"
+                        class="px-4 py-2 bg-blue-500 text-white rounded-lg transition-colors font-medium">
+                  전송
+                </button>
+              </div>
+            </div>
+            <div x-show="selectedFile" class="mt-2 flex items-center gap-2 text-sm text-gray-600">
+              <span>📎</span>
+              <span x-text="selectedFile?.name"></span>
+              <button @click="selectedFile = null" class="text-red-500 hover:text-red-700">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Memory View -->
+      <div x-show="currentView === 'memory'" class="flex-1 p-6 overflow-y-auto" x-cloak>
+        <div class="max-w-6xl mx-auto">
+          <h2 class="text-2xl font-bold mb-6">🧠 메모리 탐색기</h2>
+          
+          <!-- Search & Filter -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
+            <div class="flex gap-4">
+              <div class="flex-1">
+                <input x-model="memorySearch" 
+                       @input="searchMemories()"
+                       placeholder="메모리 검색..." 
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              </div>
+              <select x-model="memoryCategory" @change="filterMemories()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">전체 카테고리</option>
+                <option value="general">일반</option>
+                <option value="important">중요</option>
+                <option value="temporary">임시</option>
+              </select>
+              <button @click="showAddMemory = true" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">
+                + 추가
+              </button>
+            </div>
+          </div>
+
+          <!-- Memory Grid -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <template x-for="memory in filteredMemories" :key="memory.id">
+              <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-md transition-shadow">
+                <div class="flex justify-between items-start mb-3">
+                  <h3 class="font-semibold text-gray-800 break-all" x-text="memory.key"></h3>
+                  <span class="text-xs px-2 py-1 bg-gray-100 rounded-full text-gray-600" x-text="memory.category"></span>
+                </div>
+                <p class="text-gray-600 text-sm mb-4 line-clamp-3" x-text="memory.value"></p>
+                <div class="flex justify-between items-center text-xs text-gray-400">
+                  <span x-text="'중요도: ' + memory.importance"></span>
+                  <span x-text="formatDate(memory.updated_at)"></span>
+                </div>
+                <div class="mt-3 flex gap-2">
+                  <button @click="editMemory(memory)" class="text-sm text-blue-500 hover:text-blue-700">수정</button>
+                  <button @click="deleteMemory(memory.id)" class="text-sm text-red-500 hover:text-red-700">삭제</button>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Empty State -->
+          <div x-show="filteredMemories.length === 0" class="text-center py-12 text-gray-400">
+            <div class="text-4xl mb-4">📝</div>
+            <p>메모리가 없습니다</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tasks View -->
+      <div x-show="currentView === 'tasks'" class="flex-1 p-6 overflow-y-auto" x-cloak>
+        <div class="max-w-6xl mx-auto">
+          <h2 class="text-2xl font-bold mb-6">📋 작업 로그</h2>
+          
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <table class="w-full">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">설명</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">반복</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">생성일</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200">
+                <template x-for="task in tasks" :key="task.id">
+                  <tr class="hover:bg-gray-50 cursor-pointer" @click="showTaskDetail(task)">
+                    <td class="px-6 py-4 text-sm text-gray-900" x-text="task.id"></td>
+                    <td class="px-6 py-4 text-sm text-gray-900 max-w-md truncate" x-text="task.description"></td>
+                    <td class="px-6 py-4">
+                      <span :class="{
+                        'bg-green-100 text-green-800': task.status === 'completed',
+                        'bg-yellow-100 text-yellow-800': task.status === 'running',
+                        'bg-red-100 text-red-800': task.status === 'failed',
+                        'bg-orange-100 text-orange-800': task.status === 'stuck'
+                      }" class="px-2 py-1 text-xs font-medium rounded-full" x-text="task.status"></span>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-500" x-text="task.iterations"></td>
+                    <td class="px-6 py-4 text-sm text-gray-500" x-text="formatDate(task.created_at)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dashboard View -->
+      <div x-show="currentView === 'dashboard'" class="flex-1 p-6 overflow-y-auto" x-cloak>
+        <div class="max-w-7xl mx-auto">
+          <h2 class="text-2xl font-bold mb-6">📊 대시보드</h2>
+          
+          <!-- Stats Cards -->
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div class="text-sm text-gray-500 mb-1">오늘 API 호출</div>
+              <div class="text-3xl font-bold text-blue-600" x-text="stats.totalRequests || 0"></div>
+              <div class="text-xs text-gray-400 mt-2">총 토큰: <span x-text="(stats.totalTokens || 0).toLocaleString()"></span></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div class="text-sm text-gray-500 mb-1">성공률</div>
+              <div class="text-3xl font-bold text-green-600" x-text="calculateSuccessRate() + '%'"></div>
+              <div class="text-xs text-gray-400 mt-2">에러: <span x-text="stats.errors || 0"></span></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div class="text-sm text-gray-500 mb-1">메모리 항목</div>
+              <div class="text-3xl font-bold text-purple-600" x-text="memories.length"></div>
+              <div class="text-xs text-gray-400 mt-2">카테고리: <span x-text="getUniqueCategories().length"></span></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div class="text-sm text-gray-500 mb-1">총 작업</div>
+              <div class="text-3xl font-bold text-orange-600" x-text="tasks.length"></div>
+              <div class="text-xs text-gray-400 mt-2">완료: <span x-text="tasks.filter(t => t.status === 'completed').length"></span></div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 class="font-semibold mb-4">API 사용량 (최근 24시간)</h3>
+              <canvas id="apiChart" width="400" height="200"></canvas>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h3 class="font-semibold mb-4">도구 사용 통계</h3>
+              <canvas id="toolChart" width="400" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings View -->
+      <div x-show="currentView === 'settings'" class="flex-1 p-6 overflow-y-auto" x-cloak>
+        <div class="max-w-2xl mx-auto">
+          <h2 class="text-2xl font-bold mb-6">⚙️ 설정</h2>
+          
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">모델</label>
+              <select x-model="config.model" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-3-flash">Gemini 3 Flash</option>
+                <option value="gemini-3-pro">Gemini 3 Pro</option>
+              </select>
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Temperature: <span x-text="config.temperature"></span></label>
+              <input type="range" x-model="config.temperature" min="0" max="2" step="0.1" 
+                     class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+              <div class="flex justify-between text-xs text-gray-500 mt-1">
+                <span>정확함 (0)</span>
+                <span>균형 (1)</span>
+                <span>창의적 (2)</span>
+              </div>
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">최대 반복 횟수: <span x-text="config.max_iterations"></span></label>
+              <input type="range" x-model="config.max_iterations" min="1" max="100" step="1" 
+                     class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">도구 타임아웃 (ms)</label>
+              <input type="number" x-model="config.tool_timeout_ms" 
+                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            
+            <div class="flex items-center gap-3">
+              <input type="checkbox" x-model="config.verbose" id="verbose" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500">
+              <label for="verbose" class="text-sm font-medium text-gray-700">상세 로깅 (Verbose)</label>
+            </div>
+            
+            <div class="pt-4 border-t border-gray-200">
+              <button @click="saveConfig()" 
+                      :disabled="isSaving"
+                      class="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50">
+                <span x-show="!isSaving">저장</span>
+                <span x-show="isSaving">저장 중...</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modals -->
+  <!-- Add/Edit Memory Modal -->
+  <div x-show="showAddMemory || editingMemory" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" x-cloak>
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 p-6">
+      <h3 class="text-lg font-semibold mb-4" x-text="editingMemory ? '메모리 수정' : '메모리 추가'"></h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">키</label>
+          <input x-model="memoryForm.key" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">값</label>
+          <textarea x-model="memoryForm.value" rows="4" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">카테고리</label>
+          <select x-model="memoryForm.category" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="general">일반</option>
+            <option value="important">중요</option>
+            <option value="temporary">임시</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button @click="cancelMemoryEdit()" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">취소</button>
+        <button @click="saveMemory()" class="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task Detail Modal -->
+  <div x-show="selectedTask" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" x-cloak>
+    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[80vh] overflow-y-auto">
+      <div class="flex justify-between items-start mb-4">
+        <h3 class="text-lg font-semibold">작업 상세</h3>
+        <button @click="selectedTask = null" class="text-gray-400 hover:text-gray-600">✕</button>
+      </div>
+      <div class="space-y-4" x-show="selectedTask">
+        <div class="grid grid-cols-2 gap-4 text-sm">
+          <div><span class="text-gray-500">ID:</span> <span x-text="selectedTask?.id"></span></div>
+          <div><span class="text-gray-500">상태:</span> <span x-text="selectedTask?.status"></span></div>
+          <div><span class="text-gray-500">반복:</span> <span x-text="selectedTask?.iterations"></span></div>
+          <div><span class="text-gray-500">세션:</span> <span x-text="selectedTask?.session_id"></span></div>
+        </div>
+        <div>
+          <span class="text-gray-500 text-sm">설명:</span>
+          <p class="mt-1 p-3 bg-gray-50 rounded-lg" x-text="selectedTask?.description"></p>
+        </div>
+        <div x-show="selectedTask?.result">
+          <span class="text-gray-500 text-sm">결과:</span>
+          <p class="mt-1 p-3 bg-gray-50 rounded-lg" x-text="selectedTask?.result"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

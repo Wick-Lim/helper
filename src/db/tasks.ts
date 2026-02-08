@@ -94,3 +94,11 @@ export function getConversationHistory(sessionId: string, limit: number = 50): A
     "SELECT role, content FROM conversations WHERE session_id = ? ORDER BY created_at ASC LIMIT ?"
   ).all(sessionId, limit) as Array<{ role: string; content: string }>;
 }
+
+// Get all tasks (for WebUI)
+export function getAllTasks(limit: number = 100): TaskRow[] {
+  const db = getDB();
+  return db.query(
+    "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?"
+  ).all(limit) as TaskRow[];
+}

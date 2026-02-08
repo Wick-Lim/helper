@@ -12,7 +12,7 @@ const DRAIN_POLL_MS = 500;
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -49,6 +49,55 @@ async function stopServer(): Promise<void> {
   serverInstance = null;
 }
 
+/** Serve static web UI files */
+async function serveStaticFile(path: string): Promise<Response> {
+  try {
+    // Map root path to index.html
+    if (path === "/" || path === "/index.html") {
+      const file = Bun.file("./src/webui/index.html");
+      return new Response(file, {
+        headers: { "Content-Type": "text/html" },
+      });
+    }
+
+    // Serve app.js and other static files
+    const filePath = path.startsWith("/") ? path.slice(1) : path;
+    const fullPath = `./src/webui/${filePath}`;
+    const file = Bun.file(fullPath);
+
+    // Check if file exists by trying to get its size
+    try {
+      await file.arrayBuffer();
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
+
+    // Determine content type
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    const contentTypes: Record<string, string> = {
+      js: "application/javascript",
+      css: "text/css",
+      html: "text/html",
+      json: "application/json",
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      svg: "image/svg+xml",
+    };
+
+    return new Response(file, {
+      headers: {
+        "Content-Type": contentTypes[ext || ""] || "application/octet-stream",
+        "Cache-Control": ext === "html" ? "no-cache" : "public, max-age=3600",
+      },
+    });
+  } catch (error) {
+    logger.error(`Failed to serve static file ${path}: ${error}`);
+    return new Response("Internal server error", { status: 500 });
+  }
+}
+
 export function startServer(port: number, llm: LLMClient): void {
   llmClient = llm;
 
@@ -63,6 +112,16 @@ export function startServer(port: number, llm: LLMClient): void {
       // CORS preflight
       if (method === "OPTIONS") {
         return new Response(null, { status: 204, headers: corsHeaders });
+      }
+
+      // Serve WebUI static files for root and /app.js
+      if (path === "/" || path === "/index.html" || path === "/app.js") {
+        const response = await serveStaticFile(path);
+        // Add CORS headers
+        for (const [key, value] of Object.entries(corsHeaders)) {
+          response.headers.set(key, value);
+        }
+        return response;
       }
 
       // Body size guard
@@ -101,4 +160,5 @@ export function startServer(port: number, llm: LLMClient): void {
   onShutdown(stopServer);
 
   logger.info(`API server listening on port ${port}`);
+  logger.info(`WebUI available at http://localhost:${port}/`);
 }
