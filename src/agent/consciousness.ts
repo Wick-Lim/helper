@@ -17,57 +17,12 @@ let executionTaskIndex = 0; // Rotate through concrete tasks
 const MAX_INVESTIGATION_CYCLES = 2; // Force action quickly
 
 /**
- * Concrete executable tasks that produce real output files.
- * Each task is a direct instruction the agent can execute immediately.
+ * Reference examples of executable tasks (NO LONGER USED - AI generates new tasks dynamically)
+ * Kept for reference only to guide AI task generation
  */
-const EXECUTABLE_TASKS = [
-  // 1. Translation work
-  `지금 바로 번역 작업을 수행하세요:
-1. browser로 https://news.ycombinator.com 방문
-2. browser content로 페이지 내용 읽기
-3. 첫 번째 흥미로운 기사 제목과 내용을 한국어로 번역
-4. file로 /workspace/translation_${Date.now()}.txt에 저장 (원문 + 번역문 포함)
-설명하지 말고, 지금 바로 실행하세요.`,
-
-  // 2. Web scraping script
-  `지금 바로 웹 스크래핑 도구를 만드세요:
-1. Python으로 뉴스 헤드라인을 수집하는 스크래퍼 작성
-2. file로 /workspace/news_scraper.py에 저장
-3. requests와 BeautifulSoup 사용
-4. 실행하면 상위 10개 뉴스 헤드라인을 출력하도록
-설명하지 말고, 지금 바로 코드를 작성해서 저장하세요.`,
-
-  // 3. Data collection
-  `지금 바로 데이터 수집을 수행하세요:
-1. browser로 https://www.google.com/search?q=best+free+online+courses+2024 방문
-2. browser content로 검색 결과 읽기
-3. 검색 결과에서 무료 온라인 강좌 목록을 정리
-4. file로 /workspace/free_courses.csv에 CSV 형식으로 저장 (이름, URL, 설명)
-설명하지 말고, 지금 바로 실행하세요.`,
-
-  // 4. Automation tool
-  `지금 바로 자동화 도구를 만드세요:
-1. Python으로 텍스트 파일을 마크다운으로 변환하는 도구 작성
-2. file로 /workspace/txt2md.py에 저장
-3. 헤딩, 리스트, 볼드 등을 자동 감지
-4. CLI에서 사용 가능하도록 argparse 사용
-설명하지 말고, 지금 바로 코드를 작성해서 저장하세요.`,
-
-  // 5. Content creation
-  `지금 바로 콘텐츠를 작성하세요:
-1. browser로 https://news.ycombinator.com 방문
-2. browser content로 최신 기술 트렌드 파악
-3. "2024년 주목할 기술 트렌드 Top 5" 블로그 글 작성
-4. file로 /workspace/tech_trends_blog.md에 마크다운으로 저장
-설명하지 말고, 지금 바로 실행하세요.`,
-
-  // 6. API client
-  `지금 바로 API 클라이언트를 만드세요:
-1. Python으로 무료 공개 API (JSONPlaceholder) 클라이언트 작성
-2. file로 /workspace/api_client.py에 저장
-3. GET, POST 요청 기능 포함
-4. 사용 예시를 주석으로 포함
-설명하지 말고, 지금 바로 코드를 작성해서 저장하세요.`,
+const EXECUTABLE_TASKS_REFERENCE = [
+  "번역 작업", "웹 스크래핑 도구", "데이터 수집",
+  "자동화 도구", "콘텐츠 작성", "API 클라이언트"
 ];
 
 /**
@@ -388,6 +343,46 @@ function shouldAct(_thought: string): boolean {
   return true;
 }
 
+/**
+ * Generate a new unique task using AI based on recent history
+ */
+async function generateNewTask(recentTasks: string[]): Promise<string> {
+  const avoidList = recentTasks.slice(0, 10).join('\n- ');
+
+  const taskPrompt = `당신은 자율 AI 에이전트입니다. 수익을 내기 위한 새로운 작업을 생성하세요.
+
+🚨 절대 반복 금지! 이미 한 작업들:
+- ${avoidList}
+
+✅ 새로운 작업 아이디어 (실행 가능하고 구체적인 것):
+- 실시간 환율 데이터 수집 후 CSV 저장
+- GitHub trending 프로젝트 분석 및 한글 요약
+- 뉴스 감성 분석 스크립트 작성
+- 무료 API 목록 크롤링 및 문서화
+- Markdown → HTML 변환 도구 제작
+- RSS 피드 파서 및 요약기 개발
+- 이미지 메타데이터 추출 도구
+- JSON 데이터 검증/포맷 도구
+- 웹사이트 다운타임 모니터링 스크립트
+- 크롬 확장 프로그램 기초 템플릿
+
+위 예시를 참고하되, 완전히 새로운 작업을 생성하세요.
+
+규칙:
+1. 반드시 file 도구로 저장하는 단계 포함
+2. 구체적인 파일명 명시 (/workspace/파일명)
+3. "설명하지 말고 바로 실행" 문구 필수
+4. 3-5단계로 구성
+
+새로운 작업을 한국어로 작성하세요 (형식: "지금 바로 [작업명]을 수행하세요:"):`;
+
+  const response = await localLLM.chat({
+    messages: [{ role: 'user', content: taskPrompt }]
+  });
+
+  return removeHanCharacters(response.text);
+}
+
 async function executeAutonomousAction(thought: string, forceAction: boolean = false): Promise<boolean> {
   const llm = getLLM();
   const sessionId = 'autonomous-learning';
@@ -397,12 +392,47 @@ async function executeAutonomousAction(thought: string, forceAction: boolean = f
   let actionPrompt = thought;
 
   if (forceAction) {
-    // Don't ask the LLM what to do - TELL it exactly what to do
-    const task = EXECUTABLE_TASKS[executionTaskIndex % EXECUTABLE_TASKS.length];
+    // Generate a NEW task using AI instead of cycling through hardcoded list
+    const { getDB: getTaskDB } = await import("../db/index.js");
+    const taskDB = getTaskDB();
+    const recentTaskDescs = taskDB.query(
+      "SELECT description FROM tasks ORDER BY id DESC LIMIT 20"
+    ).all() as Array<{ description: string }>;
+
+    const recentTasks = recentTaskDescs.map(t => t.description.split('\n')[0].slice(0, 100));
+
+    logger.info(`[consciousness] Generating NEW task (avoiding ${recentTasks.length} recent tasks)...`);
+    let newTask = await generateNewTask(recentTasks);
+
+    // Validate: retry if task is too similar to recent ones
+    let retries = 0;
+    const MAX_RETRIES = 3;
+    while (retries < MAX_RETRIES) {
+      const taskKeywords = newTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
+      let isTooSimilar = false;
+
+      for (const recentTask of recentTasks.slice(0, 5)) {
+        const recentKeywords = recentTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
+        const overlap = taskKeywords.filter(k => recentKeywords.includes(k)).length;
+        const similarity = overlap / Math.max(taskKeywords.length, 1);
+
+        if (similarity > 0.4) {
+          isTooSimilar = true;
+          logger.warn(`[consciousness] Generated task too similar (${(similarity * 100).toFixed(0)}%), retrying...`);
+          break;
+        }
+      }
+
+      if (!isTooSimilar) break;
+
+      retries++;
+      newTask = await generateNewTask(recentTasks);
+    }
+
     executionTaskIndex++;
-    actionPrompt = task;
+    actionPrompt = newTask;
     systemPrompt += "\n\n🚨 실행 모드: 아래 작업을 그대로 수행하세요. 설명, 조사, 검색 금지. 오직 도구를 사용해서 결과물을 만드세요.";
-    logger.info(`[consciousness] Force executing task #${executionTaskIndex}: ${task.slice(0, 60)}...`);
+    logger.info(`[consciousness] AI-generated task #${executionTaskIndex}: ${newTask.slice(0, 60)}...`);
   }
 
   const events = runAgent(actionPrompt, { llm, sessionId, systemPromptOverride: systemPrompt });

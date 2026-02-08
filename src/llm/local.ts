@@ -9,9 +9,9 @@ import { rateLimiters, recordApiUsage } from "../core/ratelimit.js";
 import type { LLMClient, ChatParams, ChatResponse } from "./types.js";
 import type { ToolDeclaration, ChatMessage } from "../core/types.js";
 
-// Modal.com endpoint for Qwen 2.5 32B (4-bit AWQ)
-const MODAL_ENDPOINT = process.env.MODAL_ENDPOINT || "http://localhost:8080";
-const MODEL_NAME = "Qwen2.5-32B-Instruct-AWQ";
+// Ollama endpoint for DeepSeek R1 Distill Qwen (local reasoning engine)
+const OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || "http://localhost:11434";
+const MODEL_NAME = "deepseek-r1:7b";
 
 /**
  * Convert our tool declarations to OpenAI-compatible function format
@@ -172,12 +172,12 @@ export function createLocalClient(): LLMClient {
         // Convert messages
         const messages = toOpenAIMessages(params.messages, systemPrompt);
 
-        // Call Modal.com endpoint
-        const response = await fetch(`${MODAL_ENDPOINT}/chat`, {
+        // Call Modal.com endpoint (or Ollama OpenAI-compatible API)
+        const response = await fetch(`${OLLAMA_ENDPOINT}/v1/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "local-model",
+            model: "deepseek-r1:7b",
             messages,
             temperature: params.temperature ?? 0.1, // Very low temperature for precise function calling
             max_tokens: params.maxTokens ?? 4096,
@@ -284,11 +284,11 @@ export const localLLM = {
     maxTokens?: number;
   }): Promise<{ text: string }> {
     try {
-      const response = await fetch(`${MODAL_ENDPOINT}/chat`, {
+      const response = await fetch(`${OLLAMA_ENDPOINT}/v1/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "local-model",
+          model: "deepseek-r1:7b",
           messages: params.messages,
           temperature: params.temperature ?? 0.7,
           max_tokens: params.maxTokens ?? 1024,

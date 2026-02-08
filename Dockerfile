@@ -18,7 +18,7 @@ FROM oven/bun:1-debian
 # System packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv \
-    git curl wget jq ripgrep unzip \
+    git curl wget jq ripgrep unzip zstd \
     ca-certificates \
     chromium \
     fonts-noto-cjk fonts-noto-color-emoji \
@@ -27,6 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev libcairo2 \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama for local LLM (DeepSeek R1)
+RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Remove ImageMagick PDF restriction
 RUN sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
