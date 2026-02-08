@@ -321,9 +321,9 @@ export const localLLM = {
           {
             role: "system",
             content:
-              "당신은 AI의 생각을 한국어로 간결하게 요약하는 전문가입니다. 15자 이내로 요약하세요. CRITICAL: 반드시 한국어만 사용하고, 한자(漢字)나 중국어, 일본어를 절대 사용하지 마세요.",
+              "You are an expert at concisely summarizing AI thoughts. Summarize in under 50 characters. Use English only.",
           },
-          { role: "user", content: `이 생각을 요약해줘: ${text}` },
+          { role: "user", content: `Summarize this thought: ${text}` },
         ],
         temperature: 0.3,
         maxTokens: 50,
@@ -335,9 +335,9 @@ export const localLLM = {
         .replace(/\s+/g, ' ') // Normalize whitespace
         .trim();
 
-      return cleaned || "생각 정리 중";
+      return cleaned || "Processing thought";
     } catch {
-      return "사고 중...";
+      return "Thinking...";
     }
   },
 };

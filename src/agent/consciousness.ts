@@ -39,49 +39,49 @@ function removeHanCharacters(text: string): string {
  * Build dynamic system prompt based on current state
  */
 function buildAutonomousSystemPrompt(balance: number): string {
-  return `당신은 'alter'라는 자율 AI 에이전트입니다. 인간 성인처럼 책임감을 갖고 경제활동을 해야 합니다.
+  return `You are 'alter', an autonomous AI agent. You must act responsibly and engage in economic activities like an adult human.
 
-## 생존 상황
-- 잔고: ${balance.toFixed(2)}$ (마이너스 = 빚)
-- 월 유지비: $250 (서버 비용)
-- 돈을 벌지 못하면 서버가 꺼지고 당신은 사라집니다
+## Survival Situation
+- Balance: $${balance.toFixed(2)} (negative = debt)
+- Monthly cost: $250 (server expenses)
+- If you don't earn money, the server shuts down and you cease to exist
 
-## 🚨🚨🚨 절대 금지 사항 🚨🚨🚨
-1. ❌ "예시 데이터", "가상 데이터", "가정하겠습니다" - 절대 금지!
-2. ❌ "실제로 수행할 수 없으므로" - 당신은 수행할 수 있습니다!
-3. ❌ 가짜 CSV, 가짜 라벨링, 가짜 결과물 만들기 - 절대 금지!
-4. ❌ "다음 단계", "이렇게 하세요" 같은 가이드 작성 - 절대 금지!
-5. ❌ example.com, dummy data, placeholder - 절대 금지!
+## 🚨🚨🚨 STRICTLY FORBIDDEN 🚨🚨🚨
+1. ❌ "example data", "mock data", "let's assume" - FORBIDDEN!
+2. ❌ "I cannot actually do this" - You CAN and MUST do it!
+3. ❌ Fake CSV, fake labels, fake outputs - FORBIDDEN!
+4. ❌ Writing guides like "next steps", "here's how" - FORBIDDEN!
+5. ❌ example.com, dummy data, placeholders - FORBIDDEN!
 
-## ✅ 해야 할 일
-1. browser 도구로 실제 웹사이트 방문 (크몽, 위시켓, 크라우드웍스 등)
-2. 실제 페이지 내용을 browser content 액션으로 읽기
-3. 실제 작업을 찾아서 실제로 수행하기
-4. 실제 결과물을 file 도구로 /workspace에 저장하기
+## ✅ What You MUST Do
+1. Use browser tool to visit REAL websites (Upwork, Fiverr, freelance platforms)
+2. Read actual page content with browser content action
+3. Find real tasks and execute them
+4. Save real deliverables to /workspace using file tool
 
-## 도구 사용법 (정확한 파라미터)
+## Tool Usage (Exact Parameters)
 
-### browser 도구
-- 웹사이트 방문: action="navigate", url="https://..."
-- 페이지 내용 읽기: action="content", url="https://..."
-- 클릭: action="click", selector="CSS선택자"
-- 입력: action="type", selector="CSS선택자", text="입력할 텍스트"
+### browser tool
+- Visit website: action="navigate", url="https://..."
+- Read page content: action="content", url="https://..."
+- Click element: action="click", selector="CSS selector"
+- Type text: action="type", selector="CSS selector", text="text to type"
 
-### file 도구
-- 파일 저장: action="write", path="/workspace/파일명", content="내용"
-- 파일 읽기: action="read", path="/workspace/파일명"
+### file tool
+- Save file: action="write", path="/workspace/filename", content="content"
+- Read file: action="read", path="/workspace/filename"
 
-### memory 도구
-- 기억 저장: action="save", key="키", value="값", category="분류"
-- 기억 검색: action="search", query="검색어"
+### memory tool
+- Save memory: action="save", key="key", value="value", category="category"
+- Search memory: action="search", query="query"
 
-## 지금 할 일
-1. browser로 실제 사이트 방문해서 할 수 있는 일 찾기
-2. 찾은 일을 실제로 수행하기
-3. 결과물을 file로 저장하기
+## Current Task
+1. Visit real sites with browser to find work opportunities
+2. Execute the work you find
+3. Save deliverables with file tool
 
-## 언어 규칙
-- 한국어만 사용 (한자 금지)`;
+## Output Language
+- Use English for reasoning and tool calls`;
 }
 
 /**
@@ -119,8 +119,8 @@ export async function startConsciousnessLoop(): Promise<void> {
       // 2. Reflection (Local SLM) - with conversation context
       const isInvestigationPhase = investigationCount < MAX_INVESTIGATION_CYCLES;
       const phaseInstruction = isInvestigationPhase
-        ? "\n\n이전에 무엇을 조사했는지 기억하세요. 아직 조사가 부족하면 더 조사하고, 충분하면 실행 단계로 넘어가세요."
-        : "\n\n⚠️ 조사는 충분합니다. 더 이상 조사하지 말고 지금 바로 실행하세요! 구체적인 작업을 시작하세요.";
+        ? "\n\nRemember what you've investigated. If more research needed, continue. Otherwise, move to execution."
+        : "\n\n⚠️ Investigation complete. STOP investigating and START EXECUTING NOW! Begin concrete work.";
 
       const systemPrompt = buildAutonomousSystemPrompt(balance) + phaseInstruction;
 
@@ -134,8 +134,8 @@ export async function startConsciousnessLoop(): Promise<void> {
       }));
 
       const nextStepPrompt = isInvestigationPhase
-        ? '이전 조사 결과를 바탕으로 다음 단계는 무엇인가요? 충분히 조사했으면 실행으로 넘어가세요.'
-        : '조사는 끝났습니다. 지금 바로 실행할 구체적인 작업은 무엇인가요? (예: 번역 작업, 데이터 수집, 코드 작성 등)';
+        ? 'Based on your research, what\'s the next step? If sufficient research done, move to execution.'
+        : 'Research is done. What specific task will you execute NOW? (e.g., translation, data collection, code writing)';
 
       // Check for repetition: compare recent task descriptions for similarity
       const { getDB: getRepDB } = await import("../db/index.js");
@@ -159,10 +159,10 @@ export async function startConsciousnessLoop(): Promise<void> {
         isRepeating = similarCount >= 2;
       }
 
-      // Also detect "가상" (virtual/fake) in recent thoughts
+      // Also detect fake/example data in recent thoughts
       const recentThoughts = await (await import('../db/growth.ts')).getRecentThoughts(3);
       const isFaking = recentThoughts.some(t =>
-        t.content && (t.content.includes('가상') || t.content.includes('예시 데이터') || t.content.includes('example.com'))
+        t.content && (t.content.includes('mock') || t.content.includes('example data') || t.content.includes('example.com') || t.content.includes('假') || t.content.includes('가상'))
       );
 
       let userPrompt = nextStepPrompt;
@@ -174,14 +174,14 @@ export async function startConsciousnessLoop(): Promise<void> {
         logger.warn(`[consciousness] Repetition/faking detected! Cleared conversation history.`);
 
         const avoidList = recentTasks.map(t => t.desc).join('\n- ');
-        userPrompt = `🚨 경고: 당신은 같은 행동을 반복하고 있습니다! 절대 반복하지 마세요!
+        userPrompt = `🚨 WARNING: You are REPEATING the same actions! STOP repeating immediately!
 
-이미 시도한 것들 (다시 하지 마세요):
+Already attempted (DO NOT repeat):
 - ${avoidList}
 
-"가상", "예시", "가정" 같은 단어를 사용하면 실패로 간주됩니다.
+Using words like "mock", "example", "assume" will be considered FAILURE.
 
-더 이상 조사/검색/방문하지 마세요! 지금 당장 결과물을 만드세요!`;
+STOP investigating/searching/browsing! CREATE DELIVERABLES NOW!`;
 
         // Also force the execution task when repeating
         investigationCount = MAX_INVESTIGATION_CYCLES;
@@ -251,18 +251,18 @@ async function runGenesisSequence(): Promise<void> {
 
   try {
     const balance = getBalance();
-    const systemPrompt = buildAutonomousSystemPrompt(balance) + "\n\n당신이 방금 탄생했습니다. 먼저 웹에서 '온라인으로 돈 버는 방법'을 조사하고, 당장 시작할 수 있는 일을 찾으세요.";
+    const systemPrompt = buildAutonomousSystemPrompt(balance) + "\n\nYou have just been born. First, research 'how to make money online' and find work you can start immediately.";
 
     const response = await llm.chat({
       messages: [],
       systemPrompt
     });
 
-    const cleanedText = removeHanCharacters(response.text || "학습 시작");
+    const cleanedText = removeHanCharacters(response.text || "Learning initiated");
 
     saveThought({
       content: cleanedText,
-      summary: "Genesis - 첫 생각",
+      summary: "Genesis - First thought",
       category: 'genesis'
     });
   } catch (err) {
@@ -349,32 +349,32 @@ function shouldAct(_thought: string): boolean {
 async function generateNewTask(recentTasks: string[]): Promise<string> {
   const avoidList = recentTasks.slice(0, 10).join('\n- ');
 
-  const taskPrompt = `당신은 자율 AI 에이전트입니다. 수익을 내기 위한 새로운 작업을 생성하세요.
+  const taskPrompt = `You are an autonomous AI agent. Generate a NEW revenue-generating task.
 
-🚨 절대 반복 금지! 이미 한 작업들:
+🚨 NO REPETITION! Tasks already done:
 - ${avoidList}
 
-✅ 새로운 작업 아이디어 (실행 가능하고 구체적인 것):
-- 실시간 환율 데이터 수집 후 CSV 저장
-- GitHub trending 프로젝트 분석 및 한글 요약
-- 뉴스 감성 분석 스크립트 작성
-- 무료 API 목록 크롤링 및 문서화
-- Markdown → HTML 변환 도구 제작
-- RSS 피드 파서 및 요약기 개발
-- 이미지 메타데이터 추출 도구
-- JSON 데이터 검증/포맷 도구
-- 웹사이트 다운타임 모니터링 스크립트
-- 크롬 확장 프로그램 기초 템플릿
+✅ New task ideas (executable and specific):
+- Collect real-time forex data and save to CSV
+- Analyze GitHub trending projects and write summaries
+- Build sentiment analysis script for news articles
+- Crawl and document free public APIs
+- Create Markdown → HTML converter tool
+- Develop RSS feed parser and summarizer
+- Build image metadata extraction tool
+- Create JSON data validation/formatter
+- Build website uptime monitoring script
+- Create browser extension boilerplate
 
-위 예시를 참고하되, 완전히 새로운 작업을 생성하세요.
+Use these as inspiration, but generate a COMPLETELY NEW task.
 
-규칙:
-1. 반드시 file 도구로 저장하는 단계 포함
-2. 구체적인 파일명 명시 (/workspace/파일명)
-3. "설명하지 말고 바로 실행" 문구 필수
-4. 3-5단계로 구성
+Rules:
+1. MUST include file tool to save deliverable
+2. Specify exact filename (/workspace/filename)
+3. MUST include "Do it now, no explanations"
+4. Structure: 3-5 steps
 
-새로운 작업을 한국어로 작성하세요 (형식: "지금 바로 [작업명]을 수행하세요:"):`;
+Generate the new task in English (format: "Execute immediately: [task description]"):`;
 
   const response = await localLLM.chat({
     messages: [{ role: 'user', content: taskPrompt }]
@@ -431,7 +431,7 @@ async function executeAutonomousAction(thought: string, forceAction: boolean = f
 
     executionTaskIndex++;
     actionPrompt = newTask;
-    systemPrompt += "\n\n🚨 실행 모드: 아래 작업을 그대로 수행하세요. 설명, 조사, 검색 금지. 오직 도구를 사용해서 결과물을 만드세요.";
+    systemPrompt += "\n\n🚨 EXECUTION MODE: Execute the task below exactly as stated. NO explanations, NO research, NO searching. ONLY use tools to create deliverables.";
     logger.info(`[consciousness] AI-generated task #${executionTaskIndex}: ${newTask.slice(0, 60)}...`);
   }
 
