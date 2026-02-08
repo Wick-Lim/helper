@@ -1,11 +1,14 @@
 // SQLite singleton with WAL mode and automatic migrations
+// Now supports loading sqlite-vec extension for semantic search
 
 import { Database } from "bun:sqlite";
 import { MIGRATIONS } from "./schema.js";
 import { logger } from "../core/logger.js";
 import { DB } from "../core/constants.js";
+import { existsSync } from "fs";
 
 let db: Database | null = null;
+let isVecEnabled = false;
 
 /**
  * Initialize the SQLite database with performance optimizations
@@ -24,12 +27,34 @@ export function initDB(dbPath: string = DB.PATHS.DEFAULT): Database {
   db.run("PRAGMA journal_mode = WAL");
   db.run("PRAGMA synchronous = NORMAL");
   db.run(`PRAGMA busy_timeout = ${DB.BUSY_TIMEOUT}`);
-  db.run(`PRAGMA cache_size = ${DB.CACHE_SIZE}`); // 20MB cache (negative = KB)
+  db.run(`PRAGMA cache_size = ${DB.CACHE_SIZE}`);
   db.run("PRAGMA foreign_keys = ON");
+
+  // Load sqlite-vec extension
+  const extensionPath = process.env.SQLITE_VEC_PATH || "/usr/local/lib/sqlite-vec";
+  
+  try {
+    // Specify the entry point explicitly as 'sqlite3_vec_init'
+    db.loadExtension(extensionPath, "sqlite3_vec_init");
+    logger.info("sqlite-vec extension loaded successfully");
+    isVecEnabled = true;
+  } catch (err) {
+    logger.warn(`Failed to load sqlite-vec: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   // Run migrations
   for (const migration of MIGRATIONS) {
-    db.run(migration);
+    try {
+      db.run(migration);
+    } catch (err) {
+      // Some migrations might fail if extensions are not loaded (e.g. VIRTUAL TABLE USING vec0)
+      if (migration.includes("vec0") && !isVecEnabled) {
+        logger.warn("Skipping vector table migration as sqlite-vec is not enabled");
+      } else {
+        logger.error(`Migration failed: ${migration}`);
+        throw err;
+      }
+    }
   }
 
   logger.info("Database initialized successfully");
@@ -54,6 +79,13 @@ export function getDB(): Database {
  */
 export function isDBInitialized(): boolean {
   return db !== null;
+}
+
+/**
+ * Check if vector search is enabled
+ */
+export function isVectorEnabled(): boolean {
+  return isVecEnabled;
 }
 
 /**
@@ -103,10 +135,12 @@ export function getDBStats(): {
   isInitialized: boolean;
   cacheSize: number;
   busyTimeout: number;
+  vectorEnabled: boolean;
 } {
   return {
     isInitialized: isDBInitialized(),
     cacheSize: DB.CACHE_SIZE,
     busyTimeout: DB.BUSY_TIMEOUT,
+    vectorEnabled: isVecEnabled,
   };
 }

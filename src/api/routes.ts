@@ -9,13 +9,31 @@ import * as memory from "../db/memory.js";
 import { getLLM, getCorsHeaders } from "./server.js";
 import { getAllApiUsage } from "../core/ratelimit.js";
 import { getBrowserStats } from "../tools/browser.js";
+import { logger } from "../core/logger.js";
+import { getSurvivalStats } from "../db/survival.ts";
+import { getRecentThoughts, getTimeline } from "../db/growth.ts";
+import { interruptLoop } from "../agent/consciousness.ts";
+import { INSTANCE_ID } from "../index.js";
 import { randomUUID } from "crypto";
 import { readFileSync, existsSync } from "fs";
+import { EventEmitter } from "events";
 import type { AgentEvent } from "../core/types.js";
 
 const MAX_CONCURRENT_CHATS = 3;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const SCREENSHOT_DIR = "/data/screenshots";
+
+// SSE Event Emitters (global) - exported for use in other modules
+export const timelineEvents = new EventEmitter();
+export const thoughtsEvents = new EventEmitter();
+export const tasksEvents = new EventEmitter();
+
+// Emit heartbeats to keep connections alive
+setInterval(() => {
+  timelineEvents.emit("sse", ": heartbeat\n\n");
+  thoughtsEvents.emit("sse", ": heartbeat\n\n");
+  tasksEvents.emit("sse", ": heartbeat\n\n");
+}, 15000);
 
 let activeChatCount = 0;
 
@@ -60,15 +78,44 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // GET routes
   if (method === "GET") {
-    if (path === "/health") return json({ status: "ok", timestamp: new Date().toISOString() });
+    if (path === "/health" || path === "/api/health") return json({ status: "ok", timestamp: new Date().toISOString() });
     if (path === "/api/tools") return json(registry.getDeclarations());
     if (path === "/api/config") return json(config.getAll());
     if (path === "/api/stats") return handleStats();
-    if (path === "/api/tasks") return json(tasks.getAllTasks());
+    if (path === "/api/survival") return json(getSurvivalStats());
+    if (path === "/api/thoughts/stream") return handleThoughtsSSE(req);
+    if (path === "/api/thoughts") {
+      const limit = parseInt(url.searchParams.get("limit") || "20");
+      const offset = parseInt(url.searchParams.get("offset") || "0");
+      return json(getRecentThoughts(limit, offset));
+    }
+    if (path === "/api/timeline/stream") return handleTimelineSSE(req);
+    if (path === "/api/timeline") {
+      const limit = parseInt(url.searchParams.get("limit") || "50");
+      const offset = parseInt(url.searchParams.get("offset") || "0");
+      return json(getTimeline(limit, offset));
+    }
+    if (path === "/api/info") return json({ instanceId: INSTANCE_ID });
+    if (path === "/api/tasks/stream") return handleTasksSSE(req);
+    if (path === "/api/tasks") {
+      const limit = parseInt(url.searchParams.get("limit") || "100");
+      const offset = parseInt(url.searchParams.get("offset") || "0");
+      return json(tasks.getAllTasks(limit, offset));
+    }
+    if (path === "/api/sessions") return json(tasks.getSessions());
+
+    if (path === "/api/conversations") {
+      const offset = parseInt(url.searchParams.get("offset") || "0");
+      const limit = parseInt(url.searchParams.get("limit") || "50");
+      const sessionId = url.searchParams.get("sessionId") || undefined;
+      return json(tasks.getAllConversationHistory(offset, limit, sessionId));
+    }
 
     if (path === "/api/memory") {
       const query = url.searchParams.get("q");
-      return json(query ? memory.searchMemory(query) : memory.listMemory());
+      const memoryItems = query ? memory.searchMemory(query) : memory.listMemory();
+      const knowledgeItems = memory.listKnowledge(20);
+      return json([...memoryItems, ...knowledgeItems]);
     }
 
     // GET /api/images/:filename
@@ -176,6 +223,9 @@ async function handleChat(req: Request): Promise<Response> {
   const llm = getLLM();
   const corsHeaders = getCorsHeaders();
   const abortSignal = req.signal;
+
+  // Interrupt autonomous loop for better responsiveness
+  interruptLoop(60000);
 
   activeChatCount++;
 
@@ -341,3 +391,116 @@ function handleDeleteMemory(id: number): Response {
     return json({ error: msg }, 500);
   }
 }
+
+async function handleTimelineSSE(req: Request): Promise<Response> {
+  let listenerAttached = false;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      timelineEvents.once("sse", () => {
+        controller.enqueue(Buffer.from("retry: 3000\n\n"));
+      });
+    },
+    pull(controller) {
+      if (!listenerAttached) {
+        listenerAttached = true;
+        timelineEvents.on("sse", (data) => {
+          const queue = [Buffer.from(data)];
+          const chunk = queue.shift();
+          if (chunk) controller.enqueue(chunk);
+        });
+      }
+    },
+    cancel() {
+      timelineEvents.removeAllListeners("sse");
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+async function handleThoughtsSSE(req: Request): Promise<Response> {
+  let listenerAttached = false;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      thoughtsEvents.once("sse", () => {
+        controller.enqueue(Buffer.from("retry: 3000\n\n"));
+      });
+    },
+    pull(controller) {
+      if (!listenerAttached) {
+        listenerAttached = true;
+        thoughtsEvents.on("sse", (data) => {
+          const queue = [Buffer.from(data)];
+          const chunk = queue.shift();
+          if (chunk) controller.enqueue(chunk);
+        });
+      }
+    },
+    cancel() {
+      thoughtsEvents.removeAllListeners("sse");
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+async function handleTasksSSE(req: Request): Promise<Response> {
+  logger.info('[SSE] Tasks stream connection established');
+  let listenerAttached = false;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      logger.info('[SSE] Tasks stream start() called');
+      tasksEvents.once("sse", () => {
+        logger.info('[SSE] Tasks emitting retry header');
+        controller.enqueue(Buffer.from("retry: 3000\n\n"));
+      });
+    },
+    pull(controller) {
+      logger.debug('[SSE] Tasks stream pull() called');
+      if (!listenerAttached) {
+        listenerAttached = true;
+        logger.info('[SSE] Tasks attaching listener');
+        tasksEvents.on("sse", (data) => {
+          logger.debug(`[SSE] Tasks got data: ${data.substring(0, 50)}`);
+          const queue = [Buffer.from(data)];
+          const chunk = queue.shift();
+          if (chunk) controller.enqueue(chunk);
+        });
+      }
+    },
+    cancel() {
+      logger.info('[SSE] Tasks stream cancelled');
+      tasksEvents.removeAllListeners("sse");
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+

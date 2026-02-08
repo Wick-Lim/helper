@@ -50,6 +50,38 @@ export const MIGRATIONS: string[] = [
     updated_at TEXT DEFAULT (datetime('now'))
   )`,
 
+  // Migration 2: Survival & Growth
+  `CREATE TABLE IF NOT EXISTS survival_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    amount REAL NOT NULL, -- negative for debt, positive for income
+    reason TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS thoughts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL, -- Full inner monologue
+    summary TEXT, -- Korean summary for UI
+    category TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    source TEXT,
+    importance INTEGER DEFAULT 5, -- 1-10
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+
+  // Vector table (requires sqlite-vec)
+  `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vec USING vec0(
+    id INTEGER PRIMARY KEY,
+    vector FLOAT[384]
+  )`,
+
   // Indexes
   `CREATE INDEX IF NOT EXISTS idx_memory_category ON memory(category)`,
   `CREATE INDEX IF NOT EXISTS idx_memory_key ON memory(key)`,

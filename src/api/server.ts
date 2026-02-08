@@ -98,11 +98,34 @@ async function serveStaticFile(path: string): Promise<Response> {
   }
 }
 
+function checkAuth(req: Request): boolean {
+  const webuiPassword = Bun.env.WEBUI_PASSWORD;
+
+  // No password set = allow all (for development)
+  if (!webuiPassword) return true;
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return false;
+
+  // Basic Auth format: "Basic base64(username:password)"
+  const [scheme, credentials] = authHeader.split(" ");
+  if (scheme !== "Basic" || !credentials) return false;
+
+  try {
+    const decoded = atob(credentials);
+    const [username, password] = decoded.split(":");
+    return password === webuiPassword;
+  } catch {
+    return false;
+  }
+}
+
 export function startServer(port: number, llm: LLMClient): void {
   llmClient = llm;
 
   serverInstance = Bun.serve({
     port,
+    idleTimeout: 255, // Max allowed by Bun is 255
     async fetch(req) {
       const start = Date.now();
       const method = req.method;
@@ -112,6 +135,24 @@ export function startServer(port: number, llm: LLMClient): void {
       // CORS preflight
       if (method === "OPTIONS") {
         return new Response(null, { status: 204, headers: corsHeaders });
+      }
+
+      // Health check (no auth required)
+      if (path === "/health" || path === "/api/health") {
+        return new Response(JSON.stringify({ status: "ok" }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      // Auth check for WebUI and API (except /health)
+      if (!checkAuth(req)) {
+        return new Response("Unauthorized", {
+          status: 401,
+          headers: {
+            "WWW-Authenticate": 'Basic realm="Alter WebUI"',
+            ...corsHeaders
+          }
+        });
       }
 
       // Serve WebUI static files for root and /app.js

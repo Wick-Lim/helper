@@ -3,12 +3,14 @@
 import { initDB, closeDB } from "./db/index.js";
 import { setupSignalHandlers, onShutdown } from "./core/signals.js";
 import { logger, setVerbose } from "./core/logger.js";
-import { createGeminiClient } from "./llm/gemini.js";
+import { createLocalClient } from "./llm/local.ts";
 import { getBool } from "./db/config.js";
 import { startRepl, runOneShot } from "./cli/repl.js";
 import { startServer } from "./api/server.js";
 import { startTelegramBot } from "./telegram/bot.js";
 import { randomUUID } from "crypto";
+import { startConsciousnessLoop } from "./agent/consciousness.ts";
+import { resetLedger } from "./db/survival.ts";
 
 // Register tools (side-effect imports)
 import "./tools/shell.js";
@@ -17,13 +19,23 @@ import "./tools/web.js";
 import "./tools/code.js";
 import "./tools/memory.js";
 import "./tools/browser.js";
+import "./tools/wait.js";
 import { closeBrowser } from "./tools/browser.js";
 
+// Unique ID for this specific container instance
+export const INSTANCE_ID = process.env.INSTANCE_ID || `alter-${randomUUID().slice(0, 8)}`;
+
 async function initializeDatabase(dbPath: string, retries = 3): Promise<void> {
+  const isNew = process.env.RESET_DB === "true" || !require("fs").existsSync(dbPath);
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       initDB(dbPath);
-      logger.info(`Database initialized successfully at ${dbPath}`);
+      
+      if (isNew) {
+        logger.warn("Tabula Rasa: Initializing fresh state...");
+        resetLedger();
+      }
       return;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
@@ -95,28 +107,17 @@ async function main(): Promise<void> {
   // Ensure temp directories
   await ensureTempDirectory();
 
-  // Initialize LLM client
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    logger.error("GEMINI_API_KEY environment variable is required");
-    process.exit(1);
-  }
-
-  // Validate API key format (basic check)
-  if (apiKey.length < 20) {
-    logger.error("GEMINI_API_KEY appears to be invalid (too short)");
-    process.exit(1);
-  }
-
+  // Initialize Local LLM client
+  logger.info("Initializing local LLM client (Qwen2.5-7B)...");
   let llm;
   try {
-    llm = createGeminiClient(apiKey, process.env.GEMINI_MODEL);
+    llm = createLocalClient();
   } catch (err) {
     logger.error(`Failed to initialize LLM client: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
-  const sessionId = randomUUID();
+  const sessionId = INSTANCE_ID;
 
   // Check execution mode
   const port = process.env.PORT ? parseInt(process.env.PORT) : null;
@@ -146,6 +147,11 @@ async function main(): Promise<void> {
     // API server mode
     try {
       await startServer(port, llm);
+      
+      // Start autonomous consciousness in background
+      startConsciousnessLoop().catch(err => {
+        logger.error(`Consciousness loop failed to start: ${err}`);
+      });
     } catch (err) {
       logger.error(`Failed to start API server: ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);

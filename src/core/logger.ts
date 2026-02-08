@@ -21,7 +21,7 @@ const requestContext = new AsyncLocalStorage<{ requestId: string; sessionId?: st
 // Patterns to mask (PII detection)
 const PII_PATTERNS: Array<{ pattern: RegExp; mask: string }> = [
   // API Keys and Tokens
-  { pattern: /\b[A-Za-z0-9_-]{20,}\b/g, mask: "***API_KEY***" },
+  { pattern: /\b[A-Za-z0-9_-]{32,}\b/g, mask: "***API_KEY***" },
   // Email addresses
   { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, mask: "***EMAIL***" },
   // Phone numbers (various formats)

@@ -105,7 +105,7 @@ export async function putJson(path: string, body: Record<string, unknown>): Prom
 
 /** Run a command inside the Docker container */
 export async function dockerExec(...args: string[]): Promise<string> {
-  const proc = Bun.spawn(["docker", "exec", "agentic-v2", ...args], {
+  const proc = Bun.spawn(["docker", "exec", "alter", ...args], {
     stdout: "pipe",
     stderr: "pipe",
   });

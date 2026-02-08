@@ -1,442 +1,842 @@
-// Alpine.js App - Agent WebUI
-// Main application logic
+// Alter WebUI - Simple & Robust with Infinite Scroll
+let messages = [];
+let currentView = 'chat';
+let historyOffset = 0;
+let hasMoreHistory = true;
+let isLoadingHistory = false;
+let refreshInterval = null;
 
-document.addEventListener('alpine:init', () => {
-  Alpine.data('app', () => ({
-    // State
-    currentView: 'chat',
-    sessionId: '',
-    isConnected: false,
-    
-    // Chat
-    messages: [],
-    chatInput: '',
-    isTyping: false,
-    selectedFile: null,
-    eventSource: null,
-    
-    // Memory
-    memories: [],
-    filteredMemories: [],
-    memorySearch: '',
-    memoryCategory: '',
-    showAddMemory: false,
-    editingMemory: null,
-    memoryForm: { key: '', value: '', category: 'general' },
-    
-    // Tasks
-    tasks: [],
-    selectedTask: null,
-    
-    // Dashboard
-    stats: {},
-    apiChart: null,
-    toolChart: null,
-    
-    // Settings
-    config: {
-      model: 'gemini-2.5-flash',
-      temperature: 0.7,
-      max_iterations: 100,
-      tool_timeout_ms: 30000,
-      verbose: false
-    },
-    isSaving: false,
-    
-    // Init
-    init() {
-      this.sessionId = this.generateSessionId();
-      this.checkConnection();
-      this.loadMemories();
-      this.loadTasks();
-      this.loadConfig();
-      this.loadStats();
-      
-      // Auto-refresh tasks when viewing
-      setInterval(() => {
-        if (this.currentView === 'tasks') this.loadTasks();
-        if (this.currentView === 'dashboard') this.loadStats();
-      }, 5000);
-    },
-    
-    generateSessionId() {
-      return 'webui-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-    },
-    
-    // Connection
-    async checkConnection() {
-      try {
-        const res = await fetch('/api/health');
-        this.isConnected = res.ok;
-      } catch {
-        this.isConnected = false;
-      }
-    },
-    
-    // Chat Functions
-    async sendMessage() {
-      if (!this.chatInput.trim() && !this.selectedFile) return;
-      
-      const userMessage = this.chatInput.trim();
-      this.chatInput = '';
-      
-      // Add user message
-      this.messages.push({
-        role: 'user',
-        content: userMessage,
-        timestamp: new Date()
-      });
-      
-      this.isTyping = true;
-      this.scrollToBottom();
-      
-      // Prepare request
-      const body = {
-        message: userMessage,
-        sessionId: this.sessionId
-      };
-      
-      if (this.selectedFile) {
-        const base64 = await this.fileToBase64(this.selectedFile);
-        body.images = [{
-          mimeType: this.selectedFile.type,
-          data: base64.split(',')[1]
-        }];
-        this.selectedFile = null;
-      }
-      
-      try {
-        // Use SSE for streaming
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let currentContent = '';
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                this.handleStreamEvent(data, currentContent);
-                if (data.text) currentContent = data.text;
-              } catch (e) {
-                // Ignore parse errors
-              }
-            }
-          }
-        }
-      } catch (error) {
-        this.messages.push({
-          role: 'assistant',
-          content: '❌ 오류: ' + error.message,
-          timestamp: new Date()
-        });
-      } finally {
-        this.isTyping = false;
-        this.scrollToBottom();
-      }
-    },
-    
-    handleStreamEvent(data, currentContent) {
-      if (data.type === 'text') {
-        // Update or add assistant message
-        const lastMsg = this.messages[this.messages.length - 1];
-        if (lastMsg && lastMsg.role === 'assistant' && !lastMsg.done) {
-          lastMsg.content = data.text;
-        } else {
-          this.messages.push({
-            role: 'assistant',
-            content: data.text,
-            timestamp: new Date(),
-            done: false
-          });
-        }
-        this.scrollToBottom();
-      } else if (data.type === 'tool_call') {
-        // Show tool call
-        this.messages.push({
-          role: 'tool',
-          content: `🔧 ${data.name} 실행 중...`,
-          timestamp: new Date()
-        });
-        this.scrollToBottom();
-      } else if (data.type === 'tool_result') {
-        // Update tool result
-        const lastMsg = this.messages[this.messages.length - 1];
-        if (lastMsg && lastMsg.role === 'tool') {
-          lastMsg.content = `✅ ${data.name} 완료`;
-          lastMsg.result = data.result;
-        }
-      } else if (data.type === 'done') {
-        const lastMsg = this.messages[this.messages.length - 1];
-        if (lastMsg) lastMsg.done = true;
-      } else if (data.type === 'error') {
-        this.messages.push({
-          role: 'assistant',
-          content: '❌ 오류: ' + data.error,
-          timestamp: new Date(),
-          done: true
-        });
-      }
-    },
-    
-    handleFileUpload(event) {
-      const file = event.target.files[0];
-      if (file && file.type.startsWith('image/')) {
-        this.selectedFile = file;
-      }
-    },
-    
-    fileToBase64(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-    },
-    
-    scrollToBottom() {
-      this.$nextTick(() => {
-        const container = this.$refs.chatMessages;
-        if (container) {
-          container.scrollTop = container.scrollHeight;
-        }
-      });
-    },
-    
-    renderMarkdown(content) {
-      if (!content) return '';
-      const html = marked.parse(content);
-      this.$nextTick(() => {
-        document.querySelectorAll('pre code').forEach((block) => {
-          hljs.highlightBlock(block);
-        });
-      });
-      return html;
-    },
-    
-    // Memory Functions
-    async loadMemories() {
-      try {
-        const res = await fetch('/api/memory');
-        this.memories = await res.json();
-        this.filterMemories();
-      } catch (error) {
-        console.error('Failed to load memories:', error);
-      }
-    },
-    
-    filterMemories() {
-      let filtered = this.memories;
-      
-      if (this.memorySearch) {
-        const search = this.memorySearch.toLowerCase();
-        filtered = filtered.filter(m => 
-          m.key.toLowerCase().includes(search) || 
-          m.value.toLowerCase().includes(search)
-        );
-      }
-      
-      if (this.memoryCategory) {
-        filtered = filtered.filter(m => m.category === this.memoryCategory);
-      }
-      
-      this.filteredMemories = filtered;
-    },
-    
-    searchMemories() {
-      this.filterMemories();
-    },
-    
-    editMemory(memory) {
-      this.editingMemory = memory;
-      this.memoryForm = {
-        key: memory.key,
-        value: memory.value,
-        category: memory.category
-      };
-    },
-    
-    async saveMemory() {
-      try {
-        if (this.editingMemory) {
-          await fetch(`/api/memory/${this.editingMemory.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.memoryForm)
-          });
-        } else {
-          await fetch('/api/memory', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(this.memoryForm)
-          });
-        }
-        
-        this.cancelMemoryEdit();
-        this.loadMemories();
-      } catch (error) {
-        alert('저장 실패: ' + error.message);
-      }
-    },
-    
-    async deleteMemory(id) {
-      if (!confirm('정말 삭제하시겠습니까?')) return;
-      
-      try {
-        await fetch(`/api/memory/${id}`, { method: 'DELETE' });
-        this.loadMemories();
-      } catch (error) {
-        alert('삭제 실패: ' + error.message);
-      }
-    },
-    
-    cancelMemoryEdit() {
-      this.showAddMemory = false;
-      this.editingMemory = null;
-      this.memoryForm = { key: '', value: '', category: 'general' };
-    },
-    
-    // Task Functions
-    async loadTasks() {
-      try {
-        const res = await fetch('/api/tasks');
-        this.tasks = await res.json();
-      } catch (error) {
-        console.error('Failed to load tasks:', error);
-      }
-    },
-    
-    showTaskDetail(task) {
-      this.selectedTask = task;
-    },
-    
-    // Dashboard Functions
-    async loadStats() {
-      try {
-        const res = await fetch('/api/stats');
-        this.stats = await res.json();
-        this.updateCharts();
-      } catch (error) {
-        console.error('Failed to load stats:', error);
-      }
-    },
-    
-    calculateSuccessRate() {
-      if (!this.stats.totalRequests) return 0;
-      const success = this.stats.totalRequests - this.stats.errors;
-      return Math.round((success / this.stats.totalRequests) * 100);
-    },
-    
-    getUniqueCategories() {
-      const categories = new Set(this.memories.map(m => m.category));
-      return Array.from(categories);
-    },
-    
-    updateCharts() {
-      // API Usage Chart
-      if (this.apiChart) this.apiChart.destroy();
-      const apiCtx = document.getElementById('apiChart');
-      if (apiCtx) {
-        this.apiChart = new Chart(apiCtx, {
-          type: 'line',
-          data: {
-            labels: ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
-            datasets: [{
-              label: 'API Calls',
-              data: [12, 19, 8, 25, 15, 20],
-              borderColor: 'rgb(59, 130, 246)',
-              tension: 0.4
-            }]
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } }
-          }
-        });
-      }
-      
-      // Tool Usage Chart
-      if (this.toolChart) this.toolChart.destroy();
-      const toolCtx = document.getElementById('toolChart');
-      if (toolCtx) {
-        this.toolChart = new Chart(toolCtx, {
-          type: 'doughnut',
-          data: {
-            labels: ['shell', 'file', 'web', 'code', 'memory', 'browser'],
-            datasets: [{
-              data: [30, 25, 20, 10, 10, 5],
-              backgroundColor: [
-                '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'
-              ]
-            }]
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { position: 'bottom' } }
-          }
-        });
-      }
-    },
-    
-    // Settings Functions
-    async loadConfig() {
-      try {
-        const res = await fetch('/api/config');
-        const config = await res.json();
-        this.config = { ...this.config, ...config };
-      } catch (error) {
-        console.error('Failed to load config:', error);
-      }
-    },
-    
-    async saveConfig() {
-      this.isSaving = true;
-      try {
-        await fetch('/api/config', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.config)
-        });
-        alert('설정이 저장되었습니다');
-      } catch (error) {
-        alert('저장 실패: ' + error.message);
-      } finally {
-        this.isSaving = false;
-      }
-    },
-    
-    // Utilities
-    formatTime(date) {
-      if (!date) return '';
-      const d = new Date(date);
-      return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-    },
-    
-    formatDate(date) {
-      if (!date) return '';
-      const d = new Date(date);
-      return d.toLocaleDateString('ko-KR', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
-  }));
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('[alter] Initializing...');
+  checkHealth();
+
+  // Setup URL routing
+  handleRoute();
+  window.addEventListener('hashchange', handleRoute);
+
+  // Setup scroll listener for infinite scroll
+  const messagesContainer = document.getElementById('messages');
+  messagesContainer.addEventListener('scroll', handleScroll);
+
+  // Periodic updates
+  setInterval(checkHealth, 15000);
+
+  // Auto-refresh current view
+  startAutoRefresh();
 });
+
+// URL Routing
+function handleRoute() {
+  const hash = window.location.hash.slice(1) || '/chat';
+  const view = hash.replace('/', '');
+  showView(view);
+
+  // Load chat history only on chat view
+  if (view === 'chat') {
+    loadInitialHistory();
+  }
+}
+
+// Health Check
+async function checkHealth() {
+  try {
+    const res = await fetch('/api/health');
+    const online = res.ok;
+    document.getElementById('status-dot').className = `w-2 h-2 rounded-full ${online ? 'bg-green-500' : 'bg-red-500'}`;
+    document.getElementById('status-text').textContent = online ? 'Connected' : 'Offline';
+  } catch {
+    document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-red-500';
+    document.getElementById('status-text').textContent = 'Offline';
+  }
+}
+
+// View Switching
+function showView(view) {
+  currentView = view;
+
+  // Update URL hash (without triggering hashchange)
+  if (window.location.hash !== `#/${view}`) {
+    history.replaceState(null, '', `#/${view}`);
+  }
+
+  // Hide all views
+  document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
+
+  // Show selected view
+  const viewEl = document.getElementById(`view-${view}`);
+  if (viewEl) {
+    viewEl.classList.remove('hidden');
+  }
+
+  // Update sidebar
+  document.querySelectorAll('[id^="nav-"]').forEach(el => {
+    el.className = el.className.replace('sidebar-active', '').replace('text-blue-400', 'text-gray-400');
+    if (!el.className.includes('hover:')) el.className += ' hover:text-white hover:bg-gray-800';
+  });
+
+  const navBtn = document.getElementById(`nav-${view}`);
+  if (navBtn) {
+    navBtn.className = navBtn.className.replace('text-gray-400', 'text-blue-400') + ' sidebar-active';
+  }
+
+  // Load data for view
+  if (view === 'timeline') loadTimeline();
+  if (view === 'thoughts') loadThoughts();
+  if (view === 'memory') loadMemory();
+  if (view === 'tasks') loadTasks();
+  if (view === 'stats') loadStats();
+}
+
+// Infinite Scroll Handler
+function handleScroll() {
+  const container = document.getElementById('messages');
+
+  // Load more when scrolled to top
+  if (container.scrollTop < 100 && !isLoadingHistory && hasMoreHistory) {
+    loadMoreHistory();
+  }
+
+  // Show/hide load more indicator
+  const indicator = document.getElementById('load-more-indicator');
+  if (hasMoreHistory && container.scrollTop < 200) {
+    indicator.classList.remove('hidden');
+  } else {
+    indicator.classList.add('hidden');
+  }
+}
+
+// Chat - Load Initial History (최근 50개만, web-session만)
+async function loadInitialHistory() {
+  try {
+    const res = await fetch('/api/conversations?limit=50&offset=0&sessionId=web-session');
+    const data = await res.json();
+
+    if (data.length < 50) hasMoreHistory = false;
+
+    messages = data.map(m => ({
+      role: m.role === 'model' ? 'assistant' : m.role,
+      content: m.content,
+      timestamp: m.created_at
+    })).reverse();
+
+    historyOffset = data.length;
+    renderMessages();
+    scrollToBottom();
+  } catch (e) {
+    console.error('[alter] Failed to load history:', e);
+  }
+}
+
+// Load More History (위로 스크롤할 때)
+async function loadMoreHistory() {
+  if (isLoadingHistory || !hasMoreHistory) return;
+
+  isLoadingHistory = true;
+  const container = document.getElementById('messages');
+  const oldScrollHeight = container.scrollHeight;
+
+  try {
+    const res = await fetch(`/api/conversations?limit=50&offset=${historyOffset}&sessionId=web-session`);
+    const data = await res.json();
+
+    if (data.length < 50) hasMoreHistory = false;
+    if (data.length === 0) {
+      isLoadingHistory = false;
+      return;
+    }
+
+    const oldMessages = data.map(m => ({
+      role: m.role === 'model' ? 'assistant' : m.role,
+      content: m.content,
+      timestamp: m.created_at
+    })).reverse();
+
+    messages = [...oldMessages, ...messages];
+    historyOffset += data.length;
+
+    renderMessages();
+
+    // Maintain scroll position
+    container.scrollTop = container.scrollHeight - oldScrollHeight;
+  } catch (e) {
+    console.error('[alter] Failed to load more history:', e);
+  } finally {
+    isLoadingHistory = false;
+  }
+}
+
+function renderMessages() {
+  const container = document.getElementById('messages');
+  container.innerHTML = '';
+
+  // Show date dividers
+  let lastDate = null;
+
+  messages.forEach((msg, index) => {
+    const msgDate = new Date(msg.timestamp).toDateString();
+
+    // Add date divider
+    if (msgDate !== lastDate) {
+      const divider = document.createElement('div');
+      divider.className = 'flex items-center gap-4 my-6';
+      divider.innerHTML = `
+        <div class="flex-1 h-px bg-gray-200"></div>
+        <div class="text-xs text-gray-500 px-3 py-1 bg-gray-100 rounded-full">
+          ${formatDate(msg.timestamp)}
+        </div>
+        <div class="flex-1 h-px bg-gray-200"></div>
+      `;
+      container.appendChild(divider);
+      lastDate = msgDate;
+    }
+
+    const div = document.createElement('div');
+    div.className = 'chat-message';
+
+    if (msg.role === 'user') {
+      div.innerHTML = `
+        <div class="flex justify-end gap-2 items-end">
+          <div class="text-xs text-gray-400">${formatTime(msg.timestamp)}</div>
+          <div class="bg-blue-500 text-white px-4 py-2 rounded-lg max-w-2xl break-words">
+            ${escapeHtml(msg.content)}
+          </div>
+        </div>
+      `;
+    } else if (msg.role === 'assistant') {
+      div.innerHTML = `
+        <div class="flex justify-start gap-2 items-end">
+          <div class="bg-white border px-4 py-2 rounded-lg max-w-2xl prose prose-sm">
+            ${renderMarkdown(msg.content)}
+          </div>
+          <div class="text-xs text-gray-400">${formatTime(msg.timestamp)}</div>
+        </div>
+      `;
+    }
+
+    container.appendChild(div);
+  });
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+
+  // Add user message
+  messages.push({ role: 'user', content: text, timestamp: new Date().toISOString() });
+  renderMessages();
+
+  // Show typing indicator
+  const typingDiv = document.createElement('div');
+  typingDiv.id = 'typing-indicator';
+  typingDiv.className = 'flex justify-start';
+  typingDiv.innerHTML = `
+    <div class="bg-gray-100 px-4 py-2 rounded-lg">
+      <span class="text-gray-500">입력 중...</span>
+    </div>
+  `;
+  document.getElementById('messages').appendChild(typingDiv);
+  scrollToBottom();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, sessionId: 'web-session' })
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let assistantMessage = { role: 'assistant', content: '', timestamp: new Date().toISOString() };
+
+    messages.push(assistantMessage);
+
+    // Remove typing indicator
+    const typing = document.getElementById('typing-indicator');
+    if (typing) typing.remove();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'text') {
+              assistantMessage.content = event.text;
+              renderMessages();
+              scrollToBottom();
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Update history offset (2 new messages added)
+    historyOffset += 2;
+
+  } catch (e) {
+    console.error('[alter] Send failed:', e);
+    messages.push({ role: 'assistant', content: '❌ 오류가 발생했습니다.', timestamp: new Date().toISOString() });
+    renderMessages();
+  }
+}
+
+// Timeline (unified feed) with SSE + Infinite Scroll
+let timelineOffset = 0;
+let timelineHasMore = true;
+let timelineLoading = false;
+
+async function loadTimeline() {
+  const container = document.getElementById('timeline-list');
+  if (!container) return;
+
+  timelineOffset = 0;
+  timelineHasMore = true;
+  container.innerHTML = '<p class="text-gray-500 text-sm">Loading...</p>';
+
+  // Initial load
+  try {
+    const res = await fetch('/api/timeline?limit=30&offset=0');
+    const items = await res.json();
+
+    if (items.length < 30) timelineHasMore = false;
+    timelineOffset = items.length;
+
+    container.innerHTML = items.length === 0
+      ? '<p class="text-gray-500 text-sm text-center py-8">No activity yet</p>'
+      : items.map(item => renderTimelineItem(item)).join('');
+  } catch (e) {
+    console.error('[alter] Timeline initial load failed:', e);
+    container.innerHTML = '<p class="text-gray-500 text-sm">Failed to load</p>';
+    return;
+  }
+
+  // Setup SSE for realtime updates
+  if (timelineSSE) timelineSSE.close();
+
+  timelineSSE = new EventSource('/api/timeline/stream');
+
+  timelineSSE.onmessage = (event) => {
+    try {
+      const item = JSON.parse(event.data);
+      const itemId = `timeline-${item.type}-${item.id}`;
+      if (document.getElementById(itemId)) return;
+
+      const div = document.createElement('div');
+      div.innerHTML = renderTimelineItem(item);
+      const element = div.firstElementChild;
+
+      element.id = itemId;
+      element.style.opacity = '0';
+      element.style.transform = 'translateY(-10px)';
+
+      // Remove "no activity" message if exists
+      const noActivity = container.querySelector('p');
+      if (noActivity) noActivity.remove();
+
+      container.insertBefore(element, container.firstChild);
+
+      // Fade in animation
+      setTimeout(() => {
+        element.style.transition = 'opacity 0.3s, transform 0.3s';
+        element.style.opacity = '1';
+        element.style.transform = 'translateY(0)';
+      }, 10);
+
+      timelineOffset++;
+    } catch (e) {
+      console.error('[alter] Timeline SSE error:', e);
+    }
+  };
+
+  // Setup infinite scroll
+  const view = document.getElementById('view-timeline');
+  view.onscroll = async () => {
+    if (timelineLoading || !timelineHasMore) return;
+    if (view.scrollTop + view.clientHeight >= view.scrollHeight - 200) {
+      await loadMoreTimeline();
+    }
+  };
+}
+
+async function loadMoreTimeline() {
+  if (timelineLoading || !timelineHasMore) return;
+  timelineLoading = true;
+
+  const container = document.getElementById('timeline-list');
+  try {
+    const res = await fetch(`/api/timeline?limit=30&offset=${timelineOffset}`);
+    const items = await res.json();
+
+    if (items.length < 30) timelineHasMore = false;
+    timelineOffset += items.length;
+
+    items.forEach(item => {
+      container.insertAdjacentHTML('beforeend', renderTimelineItem(item));
+    });
+  } catch (e) {
+    console.error('[alter] Load more timeline failed:', e);
+  } finally {
+    timelineLoading = false;
+  }
+}
+
+function renderTimelineItem(item) {
+      const time = new Date(item.timestamp).toLocaleString('ko-KR', {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+
+  // Type-specific rendering
+  if (item.type === 'thought') {
+    return `
+          <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-r-lg hover:bg-blue-100 transition">
+            <div class="flex items-start gap-3">
+              <div class="text-2xl">💭</div>
+              <div class="flex-1">
+                <div class="flex justify-between items-start mb-1">
+                  <div class="font-semibold text-blue-700">Thought</div>
+                  <div class="text-xs text-gray-500">${time}</div>
+                </div>
+                <div class="text-sm text-gray-800 mb-1">${escapeHtml(item.summary || item.content.slice(0, 100))}</div>
+                ${item.metadata ? `<div class="text-xs text-gray-500">#${item.metadata}</div>` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (item.type === 'knowledge') {
+        const importance = item.importance || 5;
+        const stars = '⭐'.repeat(Math.min(importance, 10));
+        return `
+          <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded-r-lg hover:bg-green-100 transition">
+            <div class="flex items-start gap-3">
+              <div class="text-2xl">📚</div>
+              <div class="flex-1">
+                <div class="flex justify-between items-start mb-1">
+                  <div class="font-semibold text-green-700">Knowledge</div>
+                  <div class="text-xs text-gray-500">${time}</div>
+                </div>
+                <div class="text-sm text-gray-800 mb-1">${escapeHtml(item.summary || item.content.slice(0, 100))}</div>
+                <div class="flex gap-2 text-xs text-gray-500">
+                  ${item.metadata ? `<span>Source: ${item.metadata}</span>` : ''}
+                  <span>${stars}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (item.type === 'task') {
+        const statusColors = {
+          completed: 'bg-green-100 text-green-800',
+          running: 'bg-yellow-100 text-yellow-800',
+          failed: 'bg-red-100 text-red-800',
+          stuck: 'bg-orange-100 text-orange-800'
+        };
+        const statusColor = statusColors[item.status] || 'bg-gray-100 text-gray-800';
+
+        return `
+          <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded-r-lg hover:bg-yellow-100 transition">
+            <div class="flex items-start gap-3">
+              <div class="text-2xl">🛠️</div>
+              <div class="flex-1">
+                <div class="flex justify-between items-start mb-1">
+                  <div class="font-semibold text-yellow-700">Task</div>
+                  <div class="text-xs text-gray-500">${time}</div>
+                </div>
+                <div class="text-sm text-gray-800 mb-1">${escapeHtml(item.content.slice(0, 100))}</div>
+                <div class="flex gap-2 text-xs">
+                  <span class="px-2 py-1 rounded ${statusColor}">${item.status}</span>
+                  ${item.metadata ? `<span class="text-gray-500">Session: ${item.metadata.slice(0, 8)}</span>` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+  }
+  return '';
+}
+
+// SSE connections for each view
+let timelineSSE = null;
+let thoughtsSSE = null;
+let tasksSSE = null;
+let memorySSE = null;
+let statsSSE = null;
+
+// Thoughts with SSE + Infinite Scroll
+let thoughtsOffset = 0;
+let thoughtsHasMore = true;
+let thoughtsLoading = false;
+
+async function loadThoughts() {
+  const container = document.getElementById('thoughts-list');
+  if (!container) return;
+
+  thoughtsOffset = 0;
+  thoughtsHasMore = true;
+  container.innerHTML = '<p class="text-gray-500 text-sm">Loading...</p>';
+
+  // Initial load
+  try {
+    const res = await fetch('/api/thoughts?limit=20&offset=0');
+    const thoughts = await res.json();
+
+    if (thoughts.length < 20) thoughtsHasMore = false;
+    thoughtsOffset = thoughts.length;
+
+    container.innerHTML = thoughts.map(renderThought).join('');
+  } catch (e) {
+    console.error('[alter] Thoughts initial load failed:', e);
+    container.innerHTML = '<p class="text-gray-500 text-sm">Failed to load</p>';
+    return;
+  }
+
+  // Setup SSE for new thoughts
+  if (thoughtsSSE) thoughtsSSE.close();
+
+  thoughtsSSE = new EventSource('/api/thoughts/stream');
+  thoughtsSSE.onmessage = (event) => {
+    try {
+      const thought = JSON.parse(event.data);
+      const thoughtId = `thought-${thought.id}`;
+      if (document.getElementById(thoughtId)) return;
+
+      const div = document.createElement('div');
+      div.innerHTML = renderThought(thought);
+      const el = div.firstElementChild;
+      el.id = thoughtId;
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(-10px)';
+
+      container.insertBefore(el, container.firstChild);
+
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.3s, transform 0.3s';
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+      }, 10);
+
+      thoughtsOffset++;
+    } catch (e) {
+      console.error('[alter] Thoughts SSE error:', e);
+    }
+  };
+
+  // Setup infinite scroll
+  const view = document.getElementById('view-thoughts');
+  view.onscroll = async () => {
+    if (thoughtsLoading || !thoughtsHasMore) return;
+    if (view.scrollTop + view.clientHeight >= view.scrollHeight - 200) {
+      await loadMoreThoughts();
+    }
+  };
+}
+
+async function loadMoreThoughts() {
+  if (thoughtsLoading || !thoughtsHasMore) return;
+  thoughtsLoading = true;
+
+  const container = document.getElementById('thoughts-list');
+  try {
+    const res = await fetch(`/api/thoughts?limit=20&offset=${thoughtsOffset}`);
+    const thoughts = await res.json();
+
+    if (thoughts.length < 20) thoughtsHasMore = false;
+    thoughtsOffset += thoughts.length;
+
+    thoughts.forEach(t => {
+      container.insertAdjacentHTML('beforeend', renderThought(t));
+    });
+  } catch (e) {
+    console.error('[alter] Load more thoughts failed:', e);
+  } finally {
+    thoughtsLoading = false;
+  }
+}
+
+function renderThought(t) {
+  return `
+    <div id="thought-${t.id}" class="bg-white p-4 rounded-lg border">
+      <div class="text-xs text-gray-500 mb-1">${new Date(t.created_at).toLocaleString('ko-KR')}</div>
+      <div class="font-medium text-blue-600 mb-2">${escapeHtml(t.summary || 'Thinking...')}</div>
+      <div class="text-sm text-gray-700">${escapeHtml((t.content || '').slice(0, 200))}${(t.content || '').length > 200 ? '...' : ''}</div>
+      ${t.category ? `<div class="text-xs text-gray-400 mt-2">#${t.category}</div>` : ''}
+    </div>
+  `;
+}
+
+// Memory
+let lastMemoryData = null;
+async function loadMemory() {
+  const container = document.getElementById('memory-list');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/memory');
+    const memories = await res.json();
+
+    // Only update DOM if data changed
+    const newData = JSON.stringify(memories);
+    if (newData === lastMemoryData) return;
+    lastMemoryData = newData;
+
+    const html = memories.map(m => `
+      <div class="bg-white p-3 rounded border">
+        <div class="font-medium">${escapeHtml(m.key)}</div>
+        <div class="text-sm text-gray-600">${escapeHtml(m.value)}</div>
+        <div class="text-xs text-gray-400 mt-1">${m.category}</div>
+      </div>
+    `).join('');
+
+    container.style.opacity = '0.7';
+    setTimeout(() => {
+      container.innerHTML = html;
+      container.style.opacity = '1';
+    }, 100);
+  } catch (e) {
+    console.error('[alter] Memory load failed:', e);
+  }
+}
+
+// Tasks with Infinite Scroll
+let tasksOffset = 0;
+let tasksHasMore = true;
+let tasksLoading = false;
+
+async function loadTasks() {
+  const container = document.getElementById('tasks-list');
+  if (!container) return;
+
+  tasksOffset = 0;
+  tasksHasMore = true;
+  container.innerHTML = '<p class="text-gray-500 text-sm">Loading...</p>';
+
+  try {
+    const res = await fetch('/api/tasks?limit=30&offset=0');
+    const tasks = await res.json();
+
+    if (tasks.length < 30) tasksHasMore = false;
+    tasksOffset = tasks.length;
+
+    container.innerHTML = tasks.map(renderTask).join('');
+  } catch (e) {
+    console.error('[alter] Tasks load failed:', e);
+    container.innerHTML = '<p class="text-gray-500 text-sm">Failed to load</p>';
+    return;
+  }
+
+  // Setup SSE for new tasks
+  if (tasksSSE) tasksSSE.close();
+
+  tasksSSE = new EventSource('/api/tasks/stream');
+  tasksSSE.onmessage = (event) => {
+    try {
+      const task = JSON.parse(event.data);
+      const taskId = `task-${task.id}`;
+      if (document.getElementById(taskId)) return;
+
+      const div = document.createElement('div');
+      div.innerHTML = renderTask(task);
+      const el = div.firstElementChild;
+      el.id = taskId;
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(-10px)';
+
+      container.insertBefore(el, container.firstChild);
+
+      setTimeout(() => {
+        el.style.transition = 'opacity 0.3s, transform 0.3s';
+        el.style.opacity = '1';
+        el.style.transform = 'translateY(0)';
+      }, 10);
+
+      tasksOffset++;
+    } catch (e) {
+      console.error('[alter] Tasks SSE error:', e);
+    }
+  };
+
+  // Setup infinite scroll
+  const view = document.getElementById('view-tasks');
+  view.onscroll = async () => {
+    if (tasksLoading || !tasksHasMore) return;
+    if (view.scrollTop + view.clientHeight >= view.scrollHeight - 200) {
+      await loadMoreTasks();
+    }
+  };
+}
+
+async function loadMoreTasks() {
+  if (tasksLoading || !tasksHasMore) return;
+  tasksLoading = true;
+
+  const container = document.getElementById('tasks-list');
+  try {
+    const res = await fetch(`/api/tasks?limit=30&offset=${tasksOffset}`);
+    const tasks = await res.json();
+
+    if (tasks.length < 30) tasksHasMore = false;
+    tasksOffset += tasks.length;
+
+    tasks.forEach(t => {
+      container.insertAdjacentHTML('beforeend', renderTask(t));
+    });
+  } catch (e) {
+    console.error('[alter] Load more tasks failed:', e);
+  } finally {
+    tasksLoading = false;
+  }
+}
+
+function renderTask(t) {
+  const statusColor = t.status === 'completed' ? 'bg-green-100 text-green-800' :
+                      t.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-gray-100';
+  return `
+    <div class="bg-white p-3 rounded border">
+      <div class="flex justify-between">
+        <div class="font-medium">${escapeHtml(t.description)}</div>
+        <span class="text-xs px-2 py-1 rounded ${statusColor}">${t.status}</span>
+      </div>
+      <div class="text-xs text-gray-500 mt-1">${new Date(t.created_at).toLocaleString('ko-KR')}</div>
+    </div>
+  `;
+}
+
+// Stats
+let lastStatsData = null;
+async function loadStats() {
+  const container = document.getElementById('stats-content');
+  if (!container) return;
+
+  try {
+    const res = await fetch('/api/stats');
+    const stats = await res.json();
+
+    // Compare stats without timestamp field
+    const statsForComparison = {...stats};
+    delete statsForComparison.timestamp;
+    const newData = JSON.stringify(statsForComparison);
+    if (newData === lastStatsData) return;
+    lastStatsData = newData;
+
+    function formatValue(value) {
+      if (typeof value === 'object' && value !== null) {
+        return Object.entries(value).map(([k, v]) => {
+          // lastRequestTime is absolute timestamp, calculate difference from now
+          if (k === 'lastRequestTime') {
+            const now = Date.now();
+            const diff = now - v;
+            const seconds = Math.floor(diff / 1000);
+            if (seconds < 60) return `${k}: ${seconds}s ago`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${k}: ${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${k}: ${hours}h ago`;
+            const days = Math.floor(hours / 24);
+            return `${k}: ${days}d ago`;
+          }
+          // lastActivity and browserAge are durations in milliseconds
+          if (k === 'lastActivity' || k === 'browserAge') {
+            const seconds = Math.floor(v / 1000);
+            if (seconds < 60) return `${k}: ${seconds}s ago`;
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${k}: ${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            return `${k}: ${hours}h ago`;
+          }
+          // Format boolean values
+          if (typeof v === 'boolean') {
+            return `${k}: ${v ? '✓' : '✗'}`;
+          }
+          // Format numbers with commas
+          if (typeof v === 'number') {
+            return `${k}: ${v.toLocaleString()}`;
+          }
+          return `${k}: ${v}`;
+        }).join('<br>');
+      }
+      return value;
+    }
+
+    const html = Object.entries(stats).map(([key, value]) => `
+      <div class="bg-white p-4 rounded border">
+        <div class="text-sm text-gray-500 font-semibold mb-2">${key}</div>
+        <div class="text-sm text-gray-700">${formatValue(value)}</div>
+      </div>
+    `).join('');
+
+    container.style.opacity = '0.7';
+    setTimeout(() => {
+      container.innerHTML = html;
+      container.style.opacity = '1';
+    }, 100);
+  } catch (e) {
+    console.error('[alter] Stats load failed:', e);
+  }
+}
+
+// Utils
+function scrollToBottom() {
+  const container = document.getElementById('messages');
+  setTimeout(() => {
+    container.scrollTop = container.scrollHeight;
+  }, 0);
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  try {
+    const html = marked.parse(text);
+    setTimeout(() => {
+      document.querySelectorAll('pre code').forEach(block => {
+        if (!block.dataset.highlighted) {
+          hljs.highlightElement(block);
+          block.dataset.highlighted = 'true';
+        }
+      });
+    }, 0);
+    return html;
+  } catch {
+    return escapeHtml(text);
+  }
+}
+
+function formatDate(timestamp) {
+  const date = new Date(timestamp);
+  const today = new Date();
+
+  if (date.toDateString() === today.toDateString()) return '오늘';
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return '어제';
+
+  return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function formatTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Auto-refresh using SSE for active view
+function startAutoRefresh() {
+  // Stats refresh every 5 seconds
+  setInterval(() => {
+    if (currentView === 'stats' && !document.hidden) loadStats();
+  }, 5000);
+}

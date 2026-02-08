@@ -77,6 +77,13 @@ export function listMemory(category?: string, limit: number = 50): MemoryRow[] {
   ).all(limit) as MemoryRow[];
 }
 
+export function listKnowledge(limit: number = 50): any[] {
+  const db = getDB();
+  return db.query(
+    "SELECT id, summary as key, substr(content, 1, 200) as value, source as category, created_at as updated_at FROM knowledge ORDER BY created_at DESC LIMIT ?"
+  ).all(limit) as any[];
+}
+
 // Delete by key
 export function deleteMemoryByKey(key: string): boolean {
   const db = getDB();

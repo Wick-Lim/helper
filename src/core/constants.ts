@@ -80,9 +80,9 @@ export const LENGTHS = {
 
 /** Rate limiting configuration */
 export const RATE_LIMITS = {
-  GEMINI: {
-    REQUESTS_PER_MINUTE: 30,
-    MAX_TOKENS: 30,
+  LOCAL_LLM: {
+    REQUESTS_PER_MINUTE: 60, // Local LLM can handle more requests
+    MAX_TOKENS: 60,
   },
   WEB: {
     REQUESTS_PER_MINUTE: 100,
@@ -126,6 +126,15 @@ export const GENERATION = {
   },
 } as const;
 
+/** Survival and Growth configuration */
+export const GROWTH = {
+  DAILY_DEBT: 250.0 / 30.0, // $250 per month
+  HOURLY_DEBT: 250.0 / (30 * 24),
+  KNOWLEDGE_MAX_ENTRIES: 10000,
+  THOUGHTS_RETENTION_DAYS: 7,
+  EMBEDDING_DIM: 384,
+} as const;
+
 /** Telegram configuration */
 export const TELEGRAM = {
   POLL_TIMEOUT: 30,
@@ -141,8 +150,7 @@ export const STUCK_DETECTION = {
 
 /** Environment variable names (for reference) */
 export const ENV_VARS = {
-  GEMINI_API_KEY: "GEMINI_API_KEY",
-  GEMINI_MODEL: "GEMINI_MODEL",
+  LOCAL_LLM_URL: "LOCAL_LLM_URL",
   TELEGRAM_TOKEN: "TELEGRAM_TOKEN",
   PORT: "PORT",
   DB_PATH: "DB_PATH",
@@ -151,7 +159,8 @@ export const ENV_VARS = {
 
 /** Default model names */
 export const MODELS = {
-  DEFAULT: "gemini-2.5-flash",
+  DEFAULT: "Qwen2.5-7B-Instruct",
+  LOCAL: "Qwen2.5-7B-Instruct",
 } as const;
 
 /** File extensions and MIME types */

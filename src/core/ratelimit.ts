@@ -120,17 +120,18 @@ export class RateLimiter {
 
 // Rate limiters for different API endpoints
 /**
- * Global rate limiters for external APIs
+ * Global rate limiters for APIs
  */
 export const rateLimiters = {
   /**
-   * Gemini API rate limiter
-   * Conservative: 30 requests per minute (free tier: 60/min)
+   * Local LLM rate limiter
+   * Prevents overload of local llama-server
+   * More permissive than cloud APIs since it's local
    */
-  gemini: new RateLimiter({
-    tokensPerInterval: RATE_LIMITS.GEMINI.REQUESTS_PER_MINUTE,
+  localLLM: new RateLimiter({
+    tokensPerInterval: RATE_LIMITS.LOCAL_LLM.REQUESTS_PER_MINUTE,
     intervalMs: 60000, // 1 minute
-    maxTokens: RATE_LIMITS.GEMINI.MAX_TOKENS,
+    maxTokens: RATE_LIMITS.LOCAL_LLM.MAX_TOKENS,
   }),
 
   /**

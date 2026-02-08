@@ -1,292 +1,127 @@
-# Helper
+# alter — Digital Alter Ego
 
-Autonomous AI agent that runs in a single Docker container. Give it a Gemini API key, connect Telegram, and you get a personal AI assistant that can execute code, browse the web, manage files, and remember everything.
+Autonomous AI agent with a survival instinct. **alter** lives in a Docker container, learns about the world 24/7, and is motivated by a real-world constraint: it must earn enough to cover its own server costs.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Docker Container                     │
-│                                                         │
-│  ┌───────────┐    ┌──────────┐    ┌──────────────────┐  │
-│  │  Telegram  │◄──►│  Agent   │◄──►│   Gemini API    │  │
-│  │   Bot      │    │ (ReAct)  │    │  (Flash/Pro)    │  │
-│  └───────────┘    └────┬─────┘    └──────────────────┘  │
-│                        │                                 │
-│            ┌───────────┼───────────┐                     │
-│            ▼           ▼           ▼                     │
-│  ┌──────────┐  ┌───────────┐  ┌──────────┐              │
-│  │  Tools   │  │  SQLite   │  │ Chromium │              │
-│  │ shell    │  │  /data/   │  │ headless │              │
-│  │ file     │  │ agent.db  │  │ browser  │              │
-│  │ web      │  │           │  │          │              │
-│  │ code     │  │ - memory  │  │ navigate │              │
-│  │ memory   │  │ - tasks   │  │ click    │              │
-│  │ browser  │  │ - history │  │ type     │              │
-│  └──────────┘  │ - config  │  │ screenshot│             │
-│                └───────────┘  └──────────┘              │
-│                                                         │
-│  Volumes:  /data (DB, persistent)                       │
-│            /workspace (user files)                      │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                       Docker Container (alter)                │
+│                                                               │
+│   ┌──────────────────────────────────────────────────────┐   │
+│   │         Unified Brain (Qwen2.5 7B Local)             │   │
+│   │  • Autonomous Reasoning  • Tool Calling  • Learning   │   │
+│   └──────────────┬───────────────────────┬────────────────┘   │
+│                  │                       │                    │
+│                  ▼                       ▼                    │
+│   ┌──────────────────┐       ┌──────────────────┐            │
+│   │  Vector Memory   │       │      Tools       │            │
+│   │  (sqlite-vec)    │       │  Browser/Shell   │            │
+│   │  • Embeddings    │       │  Code/Web/File   │            │
+│   └──────────────────┘       └──────────────────┘            │
+│                                                               │
+│   ┌──────────────┐                      ┌──────────────┐     │
+│   │   Web UI     │                      │   Telegram   │     │
+│   │  Dashboard   │                      │ Bot (Optional)│    │
+│   └──────────────┘                      └──────────────┘     │
+│                                                               │
+│   Volumes:  /data (Persistence)   /workspace (Sandboxed Ops)  │
+└───────────────────────────────────────────────────────────────┘
 ```
 
-## Features
+## 🌟 Key Features
 
-- **ReAct Agent Loop** - Plan, execute tools, observe results, repeat
-- **6 Built-in Tools** - Shell, File, Web, Code execution, Memory, Browser
-- **Telegram Bot** - Chat with your agent from any device
-- **Browser Automation** - Navigate, screenshot, click, type via headless Chromium
-- **Multimodal** - Send/receive images through Telegram
-- **Persistent Memory** - SQLite DB survives container restarts (with named volumes)
-- **Conversation History** - Remembers context within and across sessions
-- **Stuck Detection** - Auto-detects loops and terminates runaway tasks
+- **Autonomous Infinite Loop**: Unlike reactive bots, **alter** thinks and acts continuously. It reflects on its knowledge, identifies gaps, and explores the web to learn new things without human intervention.
+- **Survival Economics**: The agent is aware of its existence costs (fixed at $50/mo). Every hour, its balance decreases, creating a genuine drive to find value-generating opportunities and optimize resource usage.
+- **100% Local Brain Architecture**:
+    - **Unified Local LLM (Qwen2.5 7B-Instruct)**: All reasoning, tool calling, and decision-making happens locally at zero API cost.
+    - **Zero Cloud Dependency**: No external API keys required. Runs completely offline (except for web crawling).
+    - **Function Calling Support**: Full ReAct pattern implementation with robust JSON parsing for tool execution.
+- **Semantic Vector Memory**: Uses `sqlite-vec` and local embeddings to store knowledge as "concepts" rather than just text. It performs RAG (Retrieval-Augmented Generation) locally to maintain context across days and weeks.
+- **Real-time Mind Stream**: A modern Web UI that lets you watch the agent's thoughts in real-time via SSE. See what it's learning, how it's feeling about its "debt," and what it's planning next.
+- **Sandboxed Toolset**: Powerful but safe access to a headless browser, shell, python/JS code execution, and filesystem operations within a 4GB memory-limited container.
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. Get API Keys
+### 1. Get Telegram Token (Optional)
 
-| Key | Where |
-|-----|-------|
-| Gemini API Key | [Google AI Studio](https://aistudio.google.com/apikey) |
-| Telegram Bot Token | [BotFather](https://t.me/BotFather) → `/newbot` |
+| Key | Purpose | Where |
+|-----|---------|-------|
+| **Telegram Token** | Remote Comms (Optional) | [BotFather](https://t.me/BotFather) |
 
-### 2. Build
+**Note**: No cloud API keys required! Everything runs locally.
+
+### 2. Build and Launch
 
 ```bash
-git clone https://github.com/Wick-Lim/helper.git
-cd helper
-docker build -t helper .
-```
+# Clone the repository
+git clone https://github.com/Wick-Lim/alter.git
+cd alter
 
-### 3. Run
+# Build the autonomous engine (includes llama.cpp & Qwen2.5-7B)
+docker build -t alter .
 
-```bash
-docker run -d --name helper \
-  -e GEMINI_API_KEY="your-gemini-key" \
-  -e TELEGRAM_TOKEN="your-telegram-token" \
-  -v helper-data:/data \
-  -v helper-workspace:/workspace \
-  helper
-```
-
-> **Important:** Always use `-v helper-data:/data` (named volume). Without it, your agent's memory and history will be lost when the container restarts.
-
-### 4. Chat
-
-Open Telegram and message your bot. Done.
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | Yes | - | Google Gemini API key |
-| `TELEGRAM_TOKEN` | No | - | Telegram bot token (enables Telegram mode) |
-| `GEMINI_MODEL` | No | `gemini-3-flash-preview` | Model name ([available models](https://ai.google.dev/gemini-api/docs/models)) |
-| `PORT` | No | - | Set to enable HTTP API mode (e.g. `3000`) |
-| `DB_PATH` | No | `/data/agent.db` | SQLite database path |
-
-### Execution Modes
-
-| Mode | Trigger | Use Case |
-|------|---------|----------|
-| **Telegram** | `TELEGRAM_TOKEN` set | Chat from phone/desktop via Telegram |
-| **API** | `PORT` set | REST API + SSE streaming for custom frontends |
-| **CLI** | Neither set | Interactive REPL in terminal |
-
-Modes can be combined. Set both `PORT` and `TELEGRAM_TOKEN` to run API + Telegram simultaneously.
-
-### Examples
-
-**Telegram only (recommended):**
-```bash
-docker run -d --name helper \
-  -e GEMINI_API_KEY="your-key" \
-  -e TELEGRAM_TOKEN="your-token" \
-  -v helper-data:/data \
-  -v helper-workspace:/workspace \
-  helper
-```
-
-**API server + Telegram:**
-```bash
-docker run -d --name helper \
-  -e GEMINI_API_KEY="your-key" \
-  -e TELEGRAM_TOKEN="your-token" \
+# Run with survival mode enabled
+docker run -d --name alter \
+  -e TELEGRAM_TOKEN="your-telegram-token" \  # Optional
   -e PORT=3000 \
+  -v alter-data:/data \
+  -v alter-workspace:/workspace \
+  --memory=4g \
   -p 3000:3000 \
-  -v helper-data:/data \
-  -v helper-workspace:/workspace \
-  helper
+  alter
+
+# Or run without Telegram (local-only mode)
+docker run -d --name alter \
+  -e PORT=3000 \
+  -v alter-data:/data \
+  -v alter-workspace:/workspace \
+  --memory=4g \
+  -p 3000:3000 \
+  alter
 ```
 
-**CLI mode (interactive):**
-```bash
-docker run -it --rm \
-  -e GEMINI_API_KEY="your-key" \
-  -v helper-data:/data \
-  helper
-```
+### 3. Observe Evolution
 
-**One-shot command:**
-```bash
-docker run --rm \
-  -e GEMINI_API_KEY="your-key" \
-  helper "Summarize the latest news about AI"
-```
+- **Web Dashboard**: [http://localhost:3000](http://localhost:3000)
+- **Mind Stream**: Watch the real-time "Inner Monologue" tab.
+- **Telegram**: Your agent will alert you when it finds significant opportunities or reaches major milestones.
 
-### Volume Mounts
-
-| Volume | Container Path | Purpose |
-|--------|---------------|---------|
-| `helper-data` | `/data` | SQLite DB (memory, tasks, history, config), screenshots |
-| `helper-workspace` | `/workspace` | Working directory for agent file operations |
-
-### Container Management
-
-```bash
-# View logs
-docker logs -f helper
-
-# Stop
-docker stop helper
-
-# Start again (data persists with named volumes)
-docker start helper
-
-# Rebuild and redeploy
-docker build -t helper .
-docker stop helper && docker rm helper
-docker run -d --name helper \
-  -e GEMINI_API_KEY="your-key" \
-  -e TELEGRAM_TOKEN="your-token" \
-  -v helper-data:/data \
-  -v helper-workspace:/workspace \
-  helper
-```
-
-## Architecture
+## 🛠 Project Structure
 
 ```
 src/
-├── core/           # Types, errors, logger, signal handling
-│   ├── types.ts        # Shared type definitions (Tool, Agent, Chat)
-│   ├── errors.ts       # FatalError, RetryableError
-│   ├── logger.ts       # Colored console logger
-│   └── signals.ts      # Graceful shutdown (SIGINT/SIGTERM)
-│
-├── db/             # SQLite (WAL mode) persistence layer
-│   ├── schema.ts       # Table definitions (memory, tasks, conversations, config)
-│   ├── index.ts        # DB singleton (initDB → getDB)
-│   ├── memory.ts       # Key-value memory CRUD
-│   ├── tasks.ts        # Conversation history persistence
-│   └── config.ts       # Runtime config (KV store)
-│
-├── llm/            # Gemini API client
-│   ├── types.ts        # LLMClient interface, ChatParams, ChatResponse
-│   ├── gemini.ts       # Function calling, thinking mode, thought signatures
-│   └── retry.ts        # Exponential backoff (429/5xx retry, 401/403 fatal)
-│
-├── tools/          # 6 registered tools
-│   ├── registry.ts     # Singleton tool registry
-│   ├── shell.ts        # Bash command execution (timeout, graceful kill)
-│   ├── file.ts         # Read/write/append/list/delete anywhere
-│   ├── web.ts          # HTTP requests (rate-limited per domain)
-│   ├── code.ts         # Python/JS/Bash snippet execution
-│   ├── memory.ts       # Persistent memory (get/set/list/search/delete)
-│   └── browser.ts      # Puppeteer: navigate, screenshot, click, type, eval
-│
-├── agent/          # ReAct loop engine
-│   ├── prompts.ts      # System prompt builder
-│   ├── agent.ts        # AsyncGenerator ReAct loop (plan → act → observe)
-│   ├── executor.ts     # Tool call dispatcher
-│   ├── planner.ts      # Multi-step task decomposition
-│   └── stuck.ts        # Loop detection (3x same call, 100 iter limit)
-│
-├── telegram/       # Telegram interface
-│   └── bot.ts          # Long polling, photo support, session management
-│
-├── api/            # HTTP interface
-│   ├── server.ts       # Bun HTTP server with graceful shutdown
-│   └── routes.ts       # REST routes + SSE streaming
-│
-├── cli/            # Terminal interface
-│   ├── repl.ts         # Interactive REPL + one-shot mode
-│   ├── commands.ts     # Slash commands (/help /tools /memory /history /config)
-│   └── render.ts       # Colored output formatting
-│
-└── index.ts        # Entry point (mode selection, tool registration)
+├── agent/           # The Engine
+│   ├── consciousness.ts  # Infinite thought loop & survival logic
+│   ├── agent.ts          # ReAct execution core
+│   └── executor.ts       # Progress-reporting tool dispatcher
+├── core/            # The Nervous System
+│   ├── embeddings.ts     # Local vector generation (transformers.js)
+│   ├── ratelimit.ts      # Token bucket cost protection
+│   └── logger.ts         # PII-masking & request-tracking logs
+├── db/              # The Memory
+│   ├── schema.ts         # Vector & Ledger table definitions
+│   ├── growth.ts         # Knowledge RAG & importance-based pruning
+│   └── survival.ts       # Debt calculation & financial ledger
+├── llm/             # The Intelligence
+│   ├── local.ts          # Unified local LLM client (Qwen2.5-7B via llama-server)
+│   └── function-parser.ts # Robust JSON parsing for tool calling
+└── tools/           # The Hands
+    ├── browser.ts        # Memory-optimized headless Chromium
+    ├── shell.ts          # Security-hardened bash execution
+    └── wait.ts           # Explicit pause tool for sync
 ```
 
-### Data Flow
+## ⚙️ Configuration
 
-```
-User Message (Telegram/API/CLI)
-    │
-    ▼
-┌─────────────────┐
-│   Agent Loop     │
-│   (ReAct)        │
-│                  │     ┌─────────────────┐
-│  1. Think        │────►│   Gemini API    │
-│  2. Plan         │◄────│  (gemini-3-*)   │
-│  3. Act (tool)   │     └─────────────────┘
-│  4. Observe      │
-│  5. Repeat/Done  │
-│                  │     ┌─────────────────┐
-│  Tool Calls ─────│────►│  Tool Registry  │
-│                  │     │  shell/file/web  │
-│                  │     │  code/mem/browser│
-│                  │     └─────────────────┘
-└────────┬────────┘
-         │
-         ▼
-   Response to User
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOCAL_LLM_URL` | `http://localhost:8080` | Local llama-server endpoint (auto-started in container). |
+| `PORT` | `3000` | Port for WebUI and REST API. |
+| `TELEGRAM_TOKEN` | - | *Optional*. Enables remote control and urgent alerts. |
+| `RESET_DB` | `false` | Set to `true` once to perform a "Tabula Rasa" reset. |
+| `INSTANCE_ID` | auto | Unique ID for the specific agent instance. |
 
-## Tools
+**Cost**: $0 in API fees! Only server hosting costs (estimated $30-50/month for VPS).
 
-| Tool | Actions | Description |
-|------|---------|-------------|
-| `shell` | execute | Run bash commands with timeout and graceful termination |
-| `file` | read, write, append, list, delete | Full filesystem access inside container |
-| `web` | GET, POST, PUT, DELETE, PATCH | HTTP requests with per-domain rate limiting |
-| `code` | python, javascript, bash | Execute code snippets in isolated temp directory |
-| `memory` | get, set, list, search, delete | Persistent key-value store (survives restarts) |
-| `browser` | navigate, screenshot, click, type, evaluate, content | Headless Chromium automation |
+## ⚖️ License
 
-## What's Inside the Container
-
-| Component | Purpose | Size |
-|-----------|---------|------|
-| Bun.js | Runtime (fast, single binary) | ~90MB |
-| Chromium | Headless browser for web automation | ~300MB |
-| Python 3 + numpy/pandas | Code execution tool | ~100MB |
-| SQLite (WAL) | Persistent storage | built-in |
-| git, curl, wget, jq, ripgrep | Shell utilities | ~10MB |
-| CJK + Emoji fonts | Proper text rendering in screenshots | ~30MB |
-
-Total image size: **~530MB**
-
-## Development
-
-```bash
-# Install dependencies
-bun install
-
-# Run locally (CLI mode)
-GEMINI_API_KEY="your-key" bun run src/index.ts
-
-# Run with Telegram
-GEMINI_API_KEY="your-key" TELEGRAM_TOKEN="your-token" bun run src/index.ts
-
-# Build bundle
-bun run build
-
-# Test
-bun test tests/
-```
-
-## License
-
-MIT
+MIT. Build your own Alter Ego.

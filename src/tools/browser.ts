@@ -440,7 +440,7 @@ const browserTool: Tool = {
   declaration: {
     name: "browser",
     description:
-      "Control a headless Chromium browser. Actions: navigate (go to URL), screenshot (capture page as image for vision analysis), click (click element by CSS selector), type (type text into element), evaluate (run JavaScript on page), content (extract page text). Browser automatically manages memory and cleans up old screenshots.",
+      "Control a headless Chromium browser. Actions: navigate (go to URL), content (extract text from page - USE THIS for web searches), evaluate (run JavaScript to extract structured data), click (click element by CSS selector), type (type text into element), screenshot (save image to file, but you CANNOT see it). For Google searches, use 'content' action to get readable text.",
     parameters: {
       type: "object",
       properties: {

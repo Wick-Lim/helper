@@ -21,6 +21,7 @@ export interface AgentOptions {
   thinkingBudget?: number;
   signal?: AbortSignal;
   requestId?: string;
+  systemPromptOverride?: string;
 }
 
 export async function* runAgent(
@@ -44,8 +45,8 @@ export async function* runAgent(
       const taskId = tasks.createTask(sessionId, userMessage);
       logger.debug(`Created task: ${taskId}`);
 
-      // Assemble system prompt with context
-      const systemPrompt = assembleContext(userMessage, sessionId);
+      // Assemble system prompt with context (or use override for autonomous learning)
+      const systemPrompt = options.systemPromptOverride ?? assembleContext(userMessage, sessionId);
 
       // Load conversation history and build messages
       const history = tasks.getConversationHistory(sessionId);
@@ -62,7 +63,7 @@ export async function* runAgent(
           logger.debug(`Iteration ${iteration}/${maxIterations}`);
 
           // Call LLM
-          let response: ChatResponse;
+    let response: ChatResponse;
           try {
             response = await llm.chat({
               messages,
@@ -93,7 +94,7 @@ export async function* runAgent(
             const summary = response.text ?? "Task completed.";
             tasks.completeTask(taskId, summary.slice(0, 500));
 
-            // Save conversation
+            // Save conversation with final summary
             tasks.saveConversation(sessionId, "user", userMessage);
             tasks.saveConversation(sessionId, "model", summary);
 
@@ -106,6 +107,19 @@ export async function* runAgent(
             yield { type: "done", summary };
             return;
           }
+
+          // Save intermediate conversation even when using tools
+          // This ensures autonomous learning maintains context
+          if (iteration === 1) {
+            // Only save user message on first iteration to avoid duplicates
+            tasks.saveConversation(sessionId, "user", userMessage);
+          }
+
+          // Save model's response (including tool usage intent)
+          const intermediateResponse = response.text
+            ? response.text
+            : `[Using tools: ${response.functionCalls.map(fc => fc.name).join(', ')}]`;
+          tasks.saveConversation(sessionId, "model", intermediateResponse);
 
           // Add model's function call message to conversation
           messages.push({
@@ -123,7 +137,21 @@ export async function* runAgent(
             detector.record(fc.name, JSON.stringify(fc.args));
           }
 
-          const functionResponses = await executeToolCalls(response.functionCalls);
+          // Execute with progress streaming
+          const iterator = this; // Helper to access yield inside callback
+          const functionResponses = await executeToolCalls(response.functionCalls, (progress) => {
+             // We can't yield from a callback directly, but the executeToolCalls 
+             // now ensures activity on the stream via Bun.serve heartbeats 
+             // and we can potentially add a special 'progress' event type
+          });
+          
+          // Workaround for yielding progress events:
+          // In a real stream, Bun.serve will keep the connection alive.
+          // For UI feedback, we can emit a tool_result with 'success: true, output: "...working..."' 
+          // but that might confuse the model.
+          
+          // Instead, we rely on the increased idleTimeout and the internal heartbeats
+          // to prevent "Error in input stream".
 
           // Check abort after tool execution
           if (signal?.aborted) break;
@@ -158,6 +186,12 @@ export async function* runAgent(
             content: "",
             functionResponses,
           });
+
+          // Save tool results to conversation for context continuity
+          const toolResultsSummary = functionResponses
+            .map(fr => `${fr.name}: ${fr.response.success ? 'success' : 'failed'} - ${fr.response.output.slice(0, 200)}`)
+            .join('\n');
+          tasks.saveConversation(sessionId, "user", `[Tool results]\n${toolResultsSummary}`);
 
           // Check stuck detection
           const stuckCheck = detector.check();
