@@ -77,6 +77,17 @@ docker run -d --name alter \
   --memory=12g \
   -p 3000:3000 \
   alter
+
+# Or reuse a host-side Ollama (skips the in-container server and the ~7.6GB
+# model pull, and uses the host GPU; --memory can drop to 4g)
+docker run -d --name alter \
+  -e PORT=3000 \
+  -e OLLAMA_ENDPOINT="http://host.docker.internal:11434" \
+  -v alter-data:/data \
+  -v alter-workspace:/workspace \
+  --memory=4g \
+  -p 3000:3000 \
+  alter
 ```
 
 ### 3. Observe Evolution
@@ -114,7 +125,7 @@ src/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_ENDPOINT` | `http://localhost:11434` | Local Ollama endpoint (auto-started in container). |
+| `OLLAMA_ENDPOINT` | `http://localhost:11434` | Ollama endpoint. localhost → auto-started in container; any other host (e.g. `host.docker.internal`) → external Ollama is used as-is. |
 | `OLLAMA_MODEL` | `gemma4:12b` | Ollama model tag used as the agent's brain. |
 | `PORT` | `3000` | Port for WebUI and REST API. |
 | `TELEGRAM_TOKEN` | - | *Optional*. Enables remote control and urgent alerts. |
