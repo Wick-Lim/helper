@@ -173,32 +173,21 @@ export function createLocalClient(): LLMClient {
         // Convert messages
         const messages = toOpenAIMessages(params.messages, systemPrompt);
 
-        // Call Ollama's OpenAI-compatible API
-        const response = await fetch(`${OLLAMA_ENDPOINT}/v1/chat/completions`, {
+        // Call Ollama's native chat API with thinking disabled — Gemma 4 is a
+        // thinking model, and with the OpenAI-compatible endpoint its reasoning
+        // can consume the entire token budget leaving content empty
+        const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: MODEL_NAME,
             messages,
-            temperature: params.temperature ?? 0.1, // Very low temperature for precise function calling
-            max_tokens: params.maxTokens ?? 4096,
+            think: false,
             stream: false,
-            stop: [
-              "```\n\n",  // Stop after code block closes
-              "User:",
-              "<|im_end|>",
-              "<|endoftext|>",
-              "\n\n이",  // Common Korean sentence starters
-              "\n\n먼저",
-              "\n\n다음",
-              "\n\n실제",
-              "\n\n작업",
-              "Step 1:",
-              "### Step",
-              "1. **",
-              "2. **",
-              "[Using"
-            ],
+            options: {
+              temperature: params.temperature ?? 0.1, // Very low temperature for precise function calling
+              num_predict: params.maxTokens ?? 4096,
+            },
           }),
         });
 
@@ -207,24 +196,18 @@ export function createLocalClient(): LLMClient {
         }
 
         const json = (await response.json()) as {
-          choices?: Array<{
-            message?: { content?: string; role?: string };
-            finish_reason?: string;
-          }>;
-          usage?: {
-            prompt_tokens?: number;
-            completion_tokens?: number;
-            total_tokens?: number;
-          };
+          message?: { content?: string; thinking?: string; role?: string };
+          done_reason?: string;
+          prompt_eval_count?: number;
+          eval_count?: number;
         };
 
-        const choice = json.choices?.[0];
-        const content = choice?.message?.content || "";
+        const content = json.message?.content || "";
 
         // Track usage
-        totalTokens = json.usage?.total_tokens || 0;
-        const inputTokens = json.usage?.prompt_tokens || 0;
-        const outputTokens = json.usage?.completion_tokens || 0;
+        const inputTokens = json.prompt_eval_count || 0;
+        const outputTokens = json.eval_count || 0;
+        totalTokens = inputTokens + outputTokens;
 
         // Parse function calls from response
         let functionCalls: Array<{
@@ -259,11 +242,12 @@ export function createLocalClient(): LLMClient {
         return {
           text,
           functionCalls,
+          thinking: json.message?.thinking || undefined,
           usage: {
             inputTokens,
             outputTokens,
           },
-          finishReason: choice?.finish_reason ?? "stop",
+          finishReason: json.done_reason ?? "stop",
         };
       } catch (err) {
         success = false;
@@ -285,15 +269,18 @@ export const localLLM = {
     maxTokens?: number;
   }): Promise<{ text: string }> {
     try {
-      const response = await fetch(`${OLLAMA_ENDPOINT}/v1/chat/completions`, {
+      const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: MODEL_NAME,
           messages: params.messages,
-          temperature: params.temperature ?? 0.7,
-          max_tokens: params.maxTokens ?? 1024,
+          think: false, // see createLocalClient: reasoning would eat the token budget
           stream: false,
+          options: {
+            temperature: params.temperature ?? 0.7,
+            num_predict: params.maxTokens ?? 1024,
+          },
         }),
       });
 
@@ -302,9 +289,9 @@ export const localLLM = {
       }
 
       const json = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+        message?: { content?: string };
       };
-      const text = json.choices?.[0]?.message?.content || "";
+      const text = json.message?.content || "";
 
       return { text };
     } catch (err) {
