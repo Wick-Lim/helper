@@ -204,6 +204,13 @@ STOP investigating/searching/browsing! CREATE DELIVERABLES NOW!`;
 
       // 3. Save Thought & Stream to UI (with Han character filtering)
       const cleanedText = removeHanCharacters(reflection.text);
+      if (!cleanedText) {
+        // Empty reflection (model output swallowed/truncated) — saving it would
+        // pollute the thought stream and acting on it is meaningless
+        logger.warn('[consciousness] Empty reflection from LLM, skipping this cycle');
+        await Bun.sleep(2000);
+        continue;
+      }
       const summary = await localLLM.summarize(cleanedText);
       saveThought({ content: cleanedText, summary, category: 'learning' });
       logger.thinking(`[alter] ${summary}`);

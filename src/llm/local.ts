@@ -173,20 +173,21 @@ export function createLocalClient(): LLMClient {
         // Convert messages
         const messages = toOpenAIMessages(params.messages, systemPrompt);
 
-        // Call Ollama's native chat API with thinking disabled — Gemma 4 is a
-        // thinking model, and with the OpenAI-compatible endpoint its reasoning
-        // can consume the entire token budget leaving content empty
+        // Call Ollama's native chat API with thinking ENABLED — Gemma 4 is a
+        // thinking model and insists on reasoning when the context is messy;
+        // with think:false the template parser silently drops that output and
+        // content comes back empty. Budget must cover reasoning + answer.
         const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: MODEL_NAME,
             messages,
-            think: false,
+            think: true,
             stream: false,
             options: {
               temperature: params.temperature ?? 0.1, // Very low temperature for precise function calling
-              num_predict: params.maxTokens ?? 4096,
+              num_predict: params.maxTokens ?? 8192,
             },
           }),
         });
@@ -203,6 +204,11 @@ export function createLocalClient(): LLMClient {
         };
 
         const content = json.message?.content || "";
+        const thinking = json.message?.thinking || "";
+        // Gemma 4 occasionally emits its entire turn as reasoning, leaving
+        // content empty — fall back to the thinking text so the turn is
+        // never silently lost
+        const effective = content || thinking;
 
         // Track usage
         const inputTokens = json.prompt_eval_count || 0;
@@ -216,7 +222,7 @@ export function createLocalClient(): LLMClient {
         }> | undefined;
 
         if (params.tools && params.tools.length > 0) {
-          const parsed = parseFunctionCalls(content);
+          const parsed = parseFunctionCalls(effective);
           if (parsed.length > 0) {
             functionCalls = parsed;
             logger.debug(`Parsed ${parsed.length} function call(s) from response`);
@@ -227,10 +233,10 @@ export function createLocalClient(): LLMClient {
         let text: string | undefined;
         if (functionCalls && functionCalls.length > 0) {
           // Extract any text before the JSON block
-          const beforeJson = content.split("```")[0].trim();
+          const beforeJson = effective.split("```")[0].trim();
           text = beforeJson.length > 0 ? beforeJson : undefined;
         } else {
-          text = content;
+          text = effective;
         }
 
         success = true;
@@ -242,7 +248,7 @@ export function createLocalClient(): LLMClient {
         return {
           text,
           functionCalls,
-          thinking: json.message?.thinking || undefined,
+          thinking: content ? thinking || undefined : undefined,
           usage: {
             inputTokens,
             outputTokens,
@@ -267,19 +273,24 @@ export const localLLM = {
     messages: Array<{ role: string; content: string }>;
     temperature?: number;
     maxTokens?: number;
+    think?: boolean;
   }): Promise<{ text: string }> {
     try {
+      // think defaults to true: with it disabled Gemma 4 still emits
+      // reasoning-formatted output on messy contexts and Ollama drops it,
+      // returning empty content (see createLocalClient)
+      const think = params.think ?? true;
       const response = await fetch(`${OLLAMA_ENDPOINT}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: MODEL_NAME,
           messages: params.messages,
-          think: false, // see createLocalClient: reasoning would eat the token budget
+          think,
           stream: false,
           options: {
             temperature: params.temperature ?? 0.7,
-            num_predict: params.maxTokens ?? 1024,
+            num_predict: params.maxTokens ?? (think ? 4096 : 1024),
           },
         }),
       });
@@ -289,9 +300,11 @@ export const localLLM = {
       }
 
       const json = (await response.json()) as {
-        message?: { content?: string };
+        message?: { content?: string; thinking?: string };
       };
-      const text = json.message?.content || "";
+      // Fall back to the reasoning text when content is empty so callers
+      // (e.g. the consciousness reflection) never receive a silent turn
+      const text = json.message?.content || json.message?.thinking || "";
 
       return { text };
     } catch (err) {
@@ -303,6 +316,12 @@ export const localLLM = {
   },
 
   async summarize(text: string): Promise<string> {
+    // Never ask the model to summarize nothing — it replies with
+    // "Please provide the text..." which then pollutes the thought stream
+    if (!text.trim()) {
+      return "Processing thought";
+    }
+
     try {
       const result = await this.chat({
         messages: [
@@ -314,7 +333,8 @@ export const localLLM = {
           { role: "user", content: `Summarize this thought: ${text}` },
         ],
         temperature: 0.3,
-        maxTokens: 50,
+        maxTokens: 80,
+        think: false, // simple single-turn prompt — no reasoning needed, keeps it fast
       });
 
       // Remove Chinese characters (CJK Ideographs)
