@@ -17,6 +17,13 @@ let totalCycles = 0; // Monotonic loop-cycle counter (drives periodic cleanup)
 let executionTaskIndex = 0; // Rotate through concrete tasks
 const MAX_INVESTIGATION_CYCLES = 2; // Force action quickly
 
+// Cross-cycle project continuity: keep working on one task until it is
+// completed (or abandoned), instead of jumping to an unrelated new task
+// every cycle
+let currentTask: string | null = null;
+let currentTaskAttempts = 0;
+const MAX_TASK_ATTEMPTS = 3; // Abandon an unfinished task after this many cycles
+
 /**
  * Reference examples of executable tasks (NO LONGER USED - AI generates new tasks dynamically)
  * Kept for reference only to guide AI task generation
@@ -144,13 +151,19 @@ export async function startConsciousnessLoop(): Promise<void> {
       const { getDB: getRepDB } = await import("../db/index.js");
       const repDB = getRepDB();
       const recentTasks = repDB.query(
-        "SELECT substr(description, 1, 50) as desc FROM tasks ORDER BY id DESC LIMIT 5"
+        "SELECT substr(description, 1, 120) as desc FROM tasks WHERE session_id = 'autonomous-learning' ORDER BY id DESC LIMIT 5"
       ).all() as Array<{ desc: string }>;
 
       let isRepeating = false;
       if (recentTasks.length >= 3) {
-        // Check if 3+ recent tasks share >60% of words
-        const getWords = (s: string) => s.replace(/[^가-힣a-zA-Z\s]/g, '').split(/\s+/).filter(w => w.length > 1);
+        // Check if 3+ recent tasks share >60% of words.
+        // Strip the generated-task boilerplate first — every forced task starts
+        // with "Execute immediately: Develop a ..." and comparing that prefix
+        // made this detector fire on EVERY cycle, wiping history each time
+        const stripBoilerplate = (s: string) => s
+          .replace(/^execute immediately:?\s*/i, '')
+          .replace(/^develop (a|an)\s+(python\s+)?(tool|script|program)\s+(to|that)\s*/i, '');
+        const getWords = (s: string) => stripBoilerplate(s).replace(/[^가-힣a-zA-Z\s]/g, '').split(/\s+/).filter(w => w.length > 1);
         const words0 = getWords(recentTasks[0].desc);
         let similarCount = 0;
         for (let i = 1; i < Math.min(recentTasks.length, 4); i++) {
@@ -168,13 +181,29 @@ export async function startConsciousnessLoop(): Promise<void> {
         t.content && (t.content.includes('mock') || t.content.includes('example data') || t.content.includes('example.com') || t.content.includes('假') || t.content.includes('가상'))
       );
 
-      let userPrompt = nextStepPrompt;
+      // Chain cycles together: remind the model of its previous thought and
+      // the task it is currently working on, so reflections build on each
+      // other instead of starting from scratch every cycle
+      let continuity = '';
+      const lastThought = recentThoughts[0];
+      if (lastThought?.summary) {
+        continuity += `Your previous thought: "${lastThought.summary}"\n`;
+      }
+      if (currentTask) {
+        continuity += `Ongoing task (attempt ${currentTaskAttempts}/${MAX_TASK_ATTEMPTS}): ${currentTask.slice(0, 200)}\n`;
+      }
+
+      let userPrompt = continuity + nextStepPrompt;
       if (isRepeating || isFaking) {
-        // Clear poisoned conversation history completely
+        // Trim (don't fully wipe) the poisoned conversation: keep the last
+        // few messages so the agent retains short-term context. Note the
+        // faking check is prone to self-reference false positives (the
+        // reflection saying "no mock data" contains 'mock'), so a full wipe
+        // here would cause constant amnesia
         const { pruneConversationHistory } = await import("../db/tasks.js");
-        pruneConversationHistory('autonomous-learning', 0); // Clear ALL
-        messages.length = 0; // Clear local messages too
-        logger.warn(`[consciousness] Repetition/faking detected! Cleared conversation history.`);
+        pruneConversationHistory('autonomous-learning', 4);
+        messages.splice(0, Math.max(0, messages.length - 4));
+        logger.warn(`[consciousness] Repetition/faking detected! Trimmed conversation history.`);
 
         const avoidList = recentTasks.map(t => t.desc).join('\n- ');
         userPrompt = `🚨 WARNING: You are REPEATING the same actions! STOP repeating immediately!
@@ -390,7 +419,23 @@ Generate the new task in English (format: "Execute immediately: [task descriptio
     messages: [{ role: 'user', content: taskPrompt }]
   });
 
-  return removeHanCharacters(response.text);
+  let task = removeHanCharacters(response.text);
+
+  // The model occasionally echoes the meta-prompt ("* Role: ... Generate a
+  // NEW revenue-generating task ...") instead of answering — and that echo
+  // then gets executed as if it were a task. Extract the actual instruction
+  // line; if there is none and the text smells like the prompt itself,
+  // signal failure so the caller retries.
+  const match = task.match(/^[\s>*"'#-]{0,10}(execute immediately:?[\s\S]*)/im);
+  if (match) {
+    task = match[1].trim();
+  } else if (/NO REPETITION|new task ideas|revenue-generating task/i.test(task)) {
+    return '';
+  } else if (task) {
+    task = `Execute immediately: ${task.slice(0, 400)}`;
+  }
+
+  return task;
 }
 
 async function executeAutonomousAction(thought: string, forceAction: boolean = false): Promise<boolean> {
@@ -402,47 +447,73 @@ async function executeAutonomousAction(thought: string, forceAction: boolean = f
   let actionPrompt = thought;
 
   if (forceAction) {
-    // Generate a NEW task using AI instead of cycling through hardcoded list
-    const { getDB: getTaskDB } = await import("../db/index.js");
-    const taskDB = getTaskDB();
-    const recentTaskDescs = taskDB.query(
-      "SELECT description FROM tasks ORDER BY id DESC LIMIT 20"
-    ).all() as Array<{ description: string }>;
+    if (currentTask && currentTaskAttempts < MAX_TASK_ATTEMPTS) {
+      // Continue the unfinished task from previous cycles instead of
+      // jumping to an unrelated new one — this is what makes consecutive
+      // cycles build on each other
+      currentTaskAttempts++;
+      actionPrompt = `Continue this UNFINISHED task (attempt ${currentTaskAttempts}/${MAX_TASK_ATTEMPTS}):
+${currentTask}
 
-    const recentTasks = recentTaskDescs.map(t => t.description.split('\n')[0].slice(0, 100));
+Check the conversation for what was already done, finish the remaining steps, and save the deliverable to /workspace NOW.`;
+      logger.info(`[consciousness] Continuing task (attempt ${currentTaskAttempts}/${MAX_TASK_ATTEMPTS}): ${currentTask.slice(0, 60)}...`);
+    } else {
+      // Previous task completed or abandoned — generate a NEW task using AI
+      const { getDB: getTaskDB } = await import("../db/index.js");
+      const taskDB = getTaskDB();
+      const recentTaskDescs = taskDB.query(
+        "SELECT description FROM tasks WHERE session_id = 'autonomous-learning' ORDER BY id DESC LIMIT 20"
+      ).all() as Array<{ description: string }>;
 
-    logger.info(`[consciousness] Generating NEW task (avoiding ${recentTasks.length} recent tasks)...`);
-    let newTask = await generateNewTask(recentTasks);
+      const recentTasks = recentTaskDescs.map(t => t.description.split('\n')[0].slice(0, 100));
 
-    // Validate: retry if task is too similar to recent ones
-    let retries = 0;
-    const MAX_RETRIES = 3;
-    while (retries < MAX_RETRIES) {
-      const taskKeywords = newTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
-      let isTooSimilar = false;
+      logger.info(`[consciousness] Generating NEW task (avoiding ${recentTasks.length} recent tasks)...`);
+      let newTask = await generateNewTask(recentTasks);
 
-      for (const recentTask of recentTasks.slice(0, 5)) {
-        const recentKeywords: string[] = recentTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
-        const overlap = taskKeywords.filter(k => recentKeywords.includes(k)).length;
-        const similarity = overlap / Math.max(taskKeywords.length, 1);
-
-        if (similarity > 0.4) {
-          isTooSimilar = true;
-          logger.warn(`[consciousness] Generated task too similar (${(similarity * 100).toFixed(0)}%), retrying...`);
-          break;
+      // Validate: retry on empty/meta-echo output or if too similar to recent tasks
+      let retries = 0;
+      const MAX_RETRIES = 3;
+      while (retries < MAX_RETRIES) {
+        if (!newTask) {
+          retries++;
+          newTask = await generateNewTask(recentTasks);
+          continue;
         }
+
+        const taskKeywords = newTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
+        let isTooSimilar = false;
+
+        for (const recentTask of recentTasks.slice(0, 5)) {
+          const recentKeywords: string[] = recentTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
+          const overlap = taskKeywords.filter(k => recentKeywords.includes(k)).length;
+          const similarity = overlap / Math.max(taskKeywords.length, 1);
+
+          if (similarity > 0.4) {
+            isTooSimilar = true;
+            logger.warn(`[consciousness] Generated task too similar (${(similarity * 100).toFixed(0)}%), retrying...`);
+            break;
+          }
+        }
+
+        if (!isTooSimilar) break;
+
+        retries++;
+        newTask = await generateNewTask(recentTasks);
       }
 
-      if (!isTooSimilar) break;
+      if (!newTask) {
+        // Deterministic fallback so a generation failure never stalls the loop
+        newTask = "Execute immediately: Use the web tool to fetch the current top 10 Hacker News stories and save title, url, and points as /workspace/hn_top10.csv. Do it now, no explanations.";
+      }
 
-      retries++;
-      newTask = await generateNewTask(recentTasks);
+      executionTaskIndex++;
+      currentTask = newTask;
+      currentTaskAttempts = 1;
+      actionPrompt = newTask;
+      logger.info(`[consciousness] AI-generated task #${executionTaskIndex}: ${newTask.slice(0, 60)}...`);
     }
 
-    executionTaskIndex++;
-    actionPrompt = newTask;
     systemPrompt += "\n\n🚨 EXECUTION MODE: Execute the task below exactly as stated. NO explanations, NO research, NO searching. ONLY use tools to create deliverables.";
-    logger.info(`[consciousness] AI-generated task #${executionTaskIndex}: ${newTask.slice(0, 60)}...`);
   }
 
   const events = runAgent(actionPrompt, { llm, sessionId, systemPromptOverride: systemPrompt });
@@ -546,6 +617,16 @@ async function executeAutonomousAction(thought: string, forceAction: boolean = f
     recordTransaction(0.5, `부분 작업 완료`);
   }
 
-  // Return true if real work was done (file created with content), not just browser investigation
-  return hasCreatedFile || (hasCompletedWork && !hasUsedBrowser);
+  // Real work done = file created with content, not just browser investigation
+  const completed = hasCreatedFile || (hasCompletedWork && !hasUsedBrowser);
+
+  // Close out the current project so the next cycle starts a fresh task;
+  // otherwise keep it active and the next cycle will continue it
+  if (completed && currentTask) {
+    logger.info(`[consciousness] Task completed, closing project: ${currentTask.slice(0, 60)}...`);
+    currentTask = null;
+    currentTaskAttempts = 0;
+  }
+
+  return completed;
 }
