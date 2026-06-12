@@ -29,6 +29,7 @@ describe("Configuration Validation", () => {
     expect(get("max_iterations")).toBe(DEFAULTS.max_iterations);
     expect(get("temperature")).toBe(DEFAULTS.temperature);
     expect(get("verbose")).toBe(DEFAULTS.verbose);
+    expect(get("model")).toBe("gemma4:12b");
   });
 
   test("should validate max_iterations range", () => {
@@ -91,16 +92,17 @@ describe("Configuration Validation", () => {
   });
 
   test("should validate model name pattern", () => {
-    // Valid
-    set("model", "gemini-2.5-flash");
-    expect(get("model")).toBe("gemini-2.5-flash");
-    
-    set("model", "gemini-3-pro");
-    expect(get("model")).toBe("gemini-3-pro");
-    
+    // Valid Ollama-style model tags
+    set("model", "gemma4:12b");
+    expect(get("model")).toBe("gemma4:12b");
+
+    set("model", "gemma4.1:27b");
+    expect(get("model")).toBe("gemma4.1:27b");
+
     // Invalid - should throw
-    expect(() => set("model", "invalid-model")).toThrow();
-    expect(() => set("model", "gpt-4")).toThrow();
+    expect(() => set("model", "has spaces")).toThrow();
+    expect(() => set("model", "")).toThrow();
+    expect(() => set("model", "bad;rm -rf")).toThrow();
   });
 
   test("should store and retrieve custom values", () => {

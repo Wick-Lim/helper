@@ -9,15 +9,14 @@ import * as memory from "../db/memory.js";
 import { getLLM, getCorsHeaders } from "./server.js";
 import { getAllApiUsage } from "../core/ratelimit.js";
 import { getBrowserStats } from "../tools/browser.js";
-import { logger } from "../core/logger.js";
-import { getSurvivalStats } from "../db/survival.ts";
-import { getRecentThoughts, getTimeline } from "../db/growth.ts";
-import { interruptLoop } from "../agent/consciousness.ts";
+import { getSurvivalStats } from "../db/survival.js";
+import { getRecentThoughts, getTimeline } from "../db/growth.js";
+import { interruptLoop } from "../agent/consciousness.js";
 import { INSTANCE_ID } from "../index.js";
 import { randomUUID } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { EventEmitter } from "events";
-import type { AgentEvent } from "../core/types.js";
+import type { AgentEvent, ImageData } from "../core/types.js";
 
 const MAX_CONCURRENT_CHATS = 3;
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -27,6 +26,12 @@ const SCREENSHOT_DIR = "/data/screenshots";
 export const timelineEvents = new EventEmitter();
 export const thoughtsEvents = new EventEmitter();
 export const tasksEvents = new EventEmitter();
+
+// Each SSE client adds one listener; raise the default cap (10) to support many clients
+const MAX_SSE_CLIENTS = 100;
+timelineEvents.setMaxListeners(MAX_SSE_CLIENTS);
+thoughtsEvents.setMaxListeners(MAX_SSE_CLIENTS);
+tasksEvents.setMaxListeners(MAX_SSE_CLIENTS);
 
 // Emit heartbeats to keep connections alive
 setInterval(() => {
@@ -207,7 +212,7 @@ async function handleChat(req: Request): Promise<Response> {
     return json({ error: "Too many concurrent chat requests", limit: MAX_CONCURRENT_CHATS }, 429);
   }
 
-  let body: { message?: string; sessionId?: string; images?: Array<{ mimeType: string; data: string }> };
+  let body: { message?: string; sessionId?: string; images?: ImageData[] };
   try {
     body = await req.json();
   } catch {
@@ -393,26 +398,22 @@ function handleDeleteMemory(id: number): Response {
 }
 
 async function handleTimelineSSE(req: Request): Promise<Response> {
-  let listenerAttached = false;
+  let listener: ((data: string) => void) | undefined;
 
   const stream = new ReadableStream({
     start(controller) {
-      timelineEvents.once("sse", () => {
-        controller.enqueue(Buffer.from("retry: 3000\n\n"));
-      });
-    },
-    pull(controller) {
-      if (!listenerAttached) {
-        listenerAttached = true;
-        timelineEvents.on("sse", (data) => {
-          const queue = [Buffer.from(data)];
-          const chunk = queue.shift();
-          if (chunk) controller.enqueue(chunk);
-        });
-      }
+      controller.enqueue(Buffer.from("retry: 3000\n\n"));
+      listener = (data: string) => {
+        try {
+          controller.enqueue(Buffer.from(data));
+        } catch {
+          // Stream already closed
+        }
+      };
+      timelineEvents.on("sse", listener);
     },
     cancel() {
-      timelineEvents.removeAllListeners("sse");
+      if (listener) timelineEvents.off("sse", listener);
     },
   });
 
@@ -428,26 +429,22 @@ async function handleTimelineSSE(req: Request): Promise<Response> {
 }
 
 async function handleThoughtsSSE(req: Request): Promise<Response> {
-  let listenerAttached = false;
+  let listener: ((data: string) => void) | undefined;
 
   const stream = new ReadableStream({
     start(controller) {
-      thoughtsEvents.once("sse", () => {
-        controller.enqueue(Buffer.from("retry: 3000\n\n"));
-      });
-    },
-    pull(controller) {
-      if (!listenerAttached) {
-        listenerAttached = true;
-        thoughtsEvents.on("sse", (data) => {
-          const queue = [Buffer.from(data)];
-          const chunk = queue.shift();
-          if (chunk) controller.enqueue(chunk);
-        });
-      }
+      controller.enqueue(Buffer.from("retry: 3000\n\n"));
+      listener = (data: string) => {
+        try {
+          controller.enqueue(Buffer.from(data));
+        } catch {
+          // Stream already closed
+        }
+      };
+      thoughtsEvents.on("sse", listener);
     },
     cancel() {
-      thoughtsEvents.removeAllListeners("sse");
+      if (listener) thoughtsEvents.off("sse", listener);
     },
   });
 
@@ -463,33 +460,22 @@ async function handleThoughtsSSE(req: Request): Promise<Response> {
 }
 
 async function handleTasksSSE(req: Request): Promise<Response> {
-  logger.info('[SSE] Tasks stream connection established');
-  let listenerAttached = false;
+  let listener: ((data: string) => void) | undefined;
 
   const stream = new ReadableStream({
     start(controller) {
-      logger.info('[SSE] Tasks stream start() called');
-      tasksEvents.once("sse", () => {
-        logger.info('[SSE] Tasks emitting retry header');
-        controller.enqueue(Buffer.from("retry: 3000\n\n"));
-      });
-    },
-    pull(controller) {
-      logger.debug('[SSE] Tasks stream pull() called');
-      if (!listenerAttached) {
-        listenerAttached = true;
-        logger.info('[SSE] Tasks attaching listener');
-        tasksEvents.on("sse", (data) => {
-          logger.debug(`[SSE] Tasks got data: ${data.substring(0, 50)}`);
-          const queue = [Buffer.from(data)];
-          const chunk = queue.shift();
-          if (chunk) controller.enqueue(chunk);
-        });
-      }
+      controller.enqueue(Buffer.from("retry: 3000\n\n"));
+      listener = (data: string) => {
+        try {
+          controller.enqueue(Buffer.from(data));
+        } catch {
+          // Stream already closed
+        }
+      };
+      tasksEvents.on("sse", listener);
     },
     cancel() {
-      logger.info('[SSE] Tasks stream cancelled');
-      tasksEvents.removeAllListeners("sse");
+      if (listener) tasksEvents.off("sse", listener);
     },
   });
 

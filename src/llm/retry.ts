@@ -17,7 +17,7 @@ const DEFAULT_OPTIONS: RetryOptions = {
 
 export function classifyHttpError(status: number, body?: string): Error {
   if (status === 401 || status === 403) {
-    return new FatalError(`Authentication failed (${status}): ${body ?? "Check GEMINI_API_KEY"}`);
+    return new FatalError(`Authentication failed (${status}): ${body ?? "Check that Ollama is running and reachable at OLLAMA_ENDPOINT"}`);
   }
   if (status === 429) {
     return new RetryableError(`Rate limited (429)`, 5000);

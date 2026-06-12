@@ -2,7 +2,7 @@
 // Handles storing, searching, and pruning of agent's learned information
 
 import { getDB, isVectorEnabled } from "./index.js";
-import { embed } from "../core/embeddings.ts";
+import { embed } from "../core/embeddings.js";
 import { logger } from "../core/logger.js";
 import { GROWTH } from "../core/constants.js";
 

@@ -7,7 +7,7 @@ Autonomous AI agent with a survival instinct. **alter** lives in a Docker contai
 │                       Docker Container (alter)                │
 │                                                               │
 │   ┌──────────────────────────────────────────────────────┐   │
-│   │         Unified Brain (Qwen2.5 7B Local)             │   │
+│   │      Unified Brain (Gemma 4 12B via Ollama)          │   │
 │   │  • Autonomous Reasoning  • Tool Calling  • Learning   │   │
 │   └──────────────┬───────────────────────┬────────────────┘   │
 │                  │                       │                    │
@@ -32,12 +32,12 @@ Autonomous AI agent with a survival instinct. **alter** lives in a Docker contai
 - **Autonomous Infinite Loop**: Unlike reactive bots, **alter** thinks and acts continuously. It reflects on its knowledge, identifies gaps, and explores the web to learn new things without human intervention.
 - **Survival Economics**: The agent is aware of its existence costs (fixed at $50/mo). Every hour, its balance decreases, creating a genuine drive to find value-generating opportunities and optimize resource usage.
 - **100% Local Brain Architecture**:
-    - **Unified Local LLM (Qwen2.5 7B-Instruct)**: All reasoning, tool calling, and decision-making happens locally at zero API cost.
+    - **Unified Local LLM (Gemma 4 12B via Ollama)**: All reasoning, tool calling, and decision-making happens locally at zero API cost.
     - **Zero Cloud Dependency**: No external API keys required. Runs completely offline (except for web crawling).
     - **Function Calling Support**: Full ReAct pattern implementation with robust JSON parsing for tool execution.
 - **Semantic Vector Memory**: Uses `sqlite-vec` and local embeddings to store knowledge as "concepts" rather than just text. It performs RAG (Retrieval-Augmented Generation) locally to maintain context across days and weeks.
 - **Real-time Mind Stream**: A modern Web UI that lets you watch the agent's thoughts in real-time via SSE. See what it's learning, how it's feeling about its "debt," and what it's planning next.
-- **Sandboxed Toolset**: Powerful but safe access to a headless browser, shell, python/JS code execution, and filesystem operations within a 4GB memory-limited container.
+- **Sandboxed Toolset**: Powerful but safe access to a headless browser, shell, python/JS code execution, and filesystem operations within a 12GB memory-limited container.
 
 ## 🚀 Quick Start
 
@@ -56,7 +56,7 @@ Autonomous AI agent with a survival instinct. **alter** lives in a Docker contai
 git clone https://github.com/Wick-Lim/alter.git
 cd alter
 
-# Build the autonomous engine (includes llama.cpp & Qwen2.5-7B)
+# Build the autonomous engine (includes Ollama; gemma4:12b is pulled on first start, ~7.6GB)
 docker build -t alter .
 
 # Run with survival mode enabled
@@ -65,7 +65,7 @@ docker run -d --name alter \
   -e PORT=3000 \
   -v alter-data:/data \
   -v alter-workspace:/workspace \
-  --memory=4g \
+  --memory=12g \
   -p 3000:3000 \
   alter
 
@@ -74,7 +74,7 @@ docker run -d --name alter \
   -e PORT=3000 \
   -v alter-data:/data \
   -v alter-workspace:/workspace \
-  --memory=4g \
+  --memory=12g \
   -p 3000:3000 \
   alter
 ```
@@ -102,7 +102,7 @@ src/
 │   ├── growth.ts         # Knowledge RAG & importance-based pruning
 │   └── survival.ts       # Debt calculation & financial ledger
 ├── llm/             # The Intelligence
-│   ├── local.ts          # Unified local LLM client (Qwen2.5-7B via llama-server)
+│   ├── local.ts          # Unified local LLM client (Gemma 4 12B via Ollama)
 │   └── function-parser.ts # Robust JSON parsing for tool calling
 └── tools/           # The Hands
     ├── browser.ts        # Memory-optimized headless Chromium
@@ -114,7 +114,8 @@ src/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LOCAL_LLM_URL` | `http://localhost:8080` | Local llama-server endpoint (auto-started in container). |
+| `OLLAMA_ENDPOINT` | `http://localhost:11434` | Local Ollama endpoint (auto-started in container). |
+| `OLLAMA_MODEL` | `gemma4:12b` | Ollama model tag used as the agent's brain. |
 | `PORT` | `3000` | Port for WebUI and REST API. |
 | `TELEGRAM_TOKEN` | - | *Optional*. Enables remote control and urgent alerts. |
 | `RESET_DB` | `false` | Set to `true` once to perform a "Tabula Rasa" reset. |

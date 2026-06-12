@@ -26,33 +26,47 @@ export function recordTransaction(amount: number, reason: string): void {
 
 /**
  * Calculate and record the periodic debt based on elapsed time
- * Should be called periodically (e.g., every minute)
+ * Safe to call on every consciousness tick — debt is applied at most
+ * once per elapsed hour ($50/mo via GROWTH.HOURLY_DEBT)
  */
 export function applyHourlyDebt(): void {
   const db = getDB();
-  
-  // Check when the last debt was applied
+
+  // Check when the last hourly debt was applied
   const lastDebt = db.query(`
-    SELECT created_at FROM survival_ledger 
-    WHERE reason = 'System Maintenance (Hourly)' 
+    SELECT created_at FROM survival_ledger
+    WHERE reason = 'System Maintenance (Hourly)'
     ORDER BY created_at DESC LIMIT 1
   `).get() as { created_at: string } | null;
-  
-  const now = new Date();
-  let lastTime = lastDebt ? new Date(lastDebt.created_at + 'Z') : new Date();
-  
-  // If first time, just record now and return
-  if (!lastDebt) {
-    recordTransaction(-GROWTH.HOURLY_DEBT, 'System Maintenance (Initial)');
-    return;
+
+  let lastTime: Date;
+  if (lastDebt) {
+    lastTime = new Date(lastDebt.created_at + 'Z');
+  } else {
+    // No hourly row yet — anchor to the oldest ledger entry
+    // (genesis/initial debt), so the first hourly charge happens
+    // one hour after the ledger was created
+    const genesis = db.query(`
+      SELECT created_at FROM survival_ledger
+      ORDER BY created_at ASC LIMIT 1
+    `).get() as { created_at: string } | null;
+
+    if (!genesis) {
+      // Empty ledger: record the initial debt once to start the clock
+      recordTransaction(-GROWTH.HOURLY_DEBT, 'System Maintenance (Initial)');
+      return;
+    }
+    lastTime = new Date(genesis.created_at + 'Z');
   }
-  
-  // Calculate hours passed
-  const diffMs = now.getTime() - lastTime.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
-  
-  if (diffHours >= 1) {
-    const totalDebt = diffHours * GROWTH.HOURLY_DEBT;
+
+  // Calculate whole hours passed since the last charge
+  const diffMs = Date.now() - lastTime.getTime();
+  const wholeHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+  if (wholeHours >= 1) {
+    // Record all elapsed hours as a single row (amount is REAL in the
+    // schema, so the multiplied value fits) to keep the ledger compact
+    const totalDebt = wholeHours * GROWTH.HOURLY_DEBT;
     recordTransaction(-totalDebt, 'System Maintenance (Hourly)');
   }
 }

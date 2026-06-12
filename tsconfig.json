@@ -17,5 +17,7 @@
     "noUnusedParameters": false
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  // src/llm/gemini.ts is dormant (kept for reference, not imported anywhere);
+  // its @google/generative-ai dependency was removed with the Ollama migration
+  "exclude": ["node_modules", "dist", "src/llm/gemini.ts"]
 }

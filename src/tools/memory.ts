@@ -110,7 +110,7 @@ const memoryTool: Tool = {
           if (!key) {
             return { success: false, output: "", error: "key is required for delete" };
           }
-          const deleted = memory.deleteMemory(key);
+          const deleted = memory.deleteMemoryByKey(key);
           return {
             success: true,
             output: deleted ? `Deleted memory: ${key}` : `No memory found for key: ${key}`,

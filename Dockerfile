@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama for local LLM (DeepSeek R1)
+# Install Ollama for local LLM (Gemma 4 12B)
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Remove ImageMagick PDF restriction
@@ -65,7 +65,7 @@ RUN mkdir -p /workspace /data /data/screenshots /app/models-cache /tmp/agent && 
 
 # Set up environment
 VOLUME ["/workspace", "/data"]
-ENV MODAL_ENDPOINT=""
+ENV OLLAMA_MODEL=gemma4:12b
 ENV PORT=3000
 ENV INSTANCE_ID="alter-main"
 ENV SQLITE_VEC_PATH="/usr/local/lib/sqlite-vec"

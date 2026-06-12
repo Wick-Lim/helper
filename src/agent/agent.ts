@@ -138,7 +138,6 @@ export async function* runAgent(
           }
 
           // Execute with progress streaming
-          const iterator = this; // Helper to access yield inside callback
           const functionResponses = await executeToolCalls(response.functionCalls, (progress) => {
              // We can't yield from a callback directly, but the executeToolCalls 
              // now ensures activity on the stream via Bun.serve heartbeats 
@@ -157,7 +156,9 @@ export async function* runAgent(
           if (signal?.aborted) break;
 
           // Emit results
-          for (const fr of functionResponses) {
+          // Pair results with calls by index — executeToolCalls returns one response
+          // per call in call order, and tool names can repeat within a single turn
+          for (const [i, fr] of functionResponses.entries()) {
             yield { type: "tool_result", name: fr.name, result: fr.response };
 
             // Log tool call to DB (exclude base64 image data)
@@ -165,7 +166,7 @@ export async function* runAgent(
               ? `[screenshot: ${fr.response.images.length} image(s)]`
               : fr.response.output.slice(0, 2000);
 
-            const matchingCall = response.functionCalls.find((fc) => fc.name === fr.name);
+            const matchingCall = response.functionCalls[i];
             tasks.logToolCall(
               taskId,
               fr.name,

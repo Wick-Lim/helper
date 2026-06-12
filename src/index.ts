@@ -3,14 +3,14 @@
 import { initDB, closeDB } from "./db/index.js";
 import { setupSignalHandlers, onShutdown } from "./core/signals.js";
 import { logger, setVerbose } from "./core/logger.js";
-import { createLocalClient } from "./llm/local.ts";
+import { createLocalClient, MODEL_NAME } from "./llm/local.js";
 import { getBool } from "./db/config.js";
 import { startRepl, runOneShot } from "./cli/repl.js";
 import { startServer } from "./api/server.js";
 import { startTelegramBot } from "./telegram/bot.js";
 import { randomUUID } from "crypto";
-import { startConsciousnessLoop } from "./agent/consciousness.ts";
-import { resetLedger } from "./db/survival.ts";
+import { startConsciousnessLoop } from "./agent/consciousness.js";
+import { resetLedger } from "./db/survival.js";
 
 // Register tools (side-effect imports)
 import "./tools/shell.js";
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   await ensureTempDirectory();
 
   // Initialize Local LLM client
-  logger.info("Initializing local LLM client (Qwen2.5-7B)...");
+  logger.info(`Initializing local LLM client (Ollama: ${MODEL_NAME})...`);
   let llm;
   try {
     llm = createLocalClient();

@@ -1,6 +1,6 @@
 // File operations tool with path validation and security restrictions
 
-import type { Tool, ToolResult } from "../core/types.js";
+import type { Tool, ToolResult, FileMimeType } from "../core/types.js";
 import { registry } from "./registry.js";
 import { logger } from "../core/logger.js";
 import { resolve, normalize, dirname } from "path";
@@ -342,7 +342,7 @@ const fileTool: Tool = {
             csv: "text/csv",
             txt: "text/plain",
           };
-          const mimeType = mimeMap[ext] || "application/octet-stream";
+          const mimeType = (mimeMap[ext] || "application/octet-stream") as FileMimeType;
 
           return {
             success: true,

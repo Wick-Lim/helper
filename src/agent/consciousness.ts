@@ -1,18 +1,19 @@
 // Autonomous Consciousness Engine
 // Handles the infinite loop of thought, learning, and survival
 
-import { localLLM } from "../llm/local.ts";
+import { localLLM } from "../llm/local.js";
 import { runAgent } from "./agent.js";
 import { getLLM } from "../api/server.js";
 import { logger } from "../core/logger.js";
-import { saveThought, saveKnowledge, pruneKnowledge, pruneThoughts } from "../db/growth.ts";
-import { applyHourlyDebt, getBalance, recordTransaction } from "../db/survival.ts";
+import { saveThought, saveKnowledge, pruneKnowledge, pruneThoughts } from "../db/growth.js";
+import { applyHourlyDebt, getBalance, recordTransaction } from "../db/survival.js";
 import { isShutdown } from "../core/signals.js";
 import { GROWTH } from "../core/constants.js";
 
 let isLoopRunning = false;
 let isInterrupted = false;
 let investigationCount = 0;
+let totalCycles = 0; // Monotonic loop-cycle counter (drives periodic cleanup)
 let executionTaskIndex = 0; // Rotate through concrete tasks
 const MAX_INVESTIGATION_CYCLES = 2; // Force action quickly
 
@@ -43,7 +44,7 @@ function buildAutonomousSystemPrompt(balance: number): string {
 
 ## Survival Situation
 - Balance: $${balance.toFixed(2)} (negative = debt)
-- Monthly cost: $250 (server expenses)
+- Monthly cost: $50 (server expenses)
 - If you don't earn money, the server shuts down and you cease to exist
 
 ## 🚨🚨🚨 STRICTLY FORBIDDEN 🚨🚨🚨
@@ -112,6 +113,8 @@ export async function startConsciousnessLoop(): Promise<void> {
     }
 
     try {
+      totalCycles++;
+
       // 1. Survival Check
       applyHourlyDebt();
       const balance = getBalance();
@@ -160,7 +163,7 @@ export async function startConsciousnessLoop(): Promise<void> {
       }
 
       // Also detect fake/example data in recent thoughts
-      const recentThoughts = await (await import('../db/growth.ts')).getRecentThoughts(3);
+      const recentThoughts = await (await import('../db/growth.js')).getRecentThoughts(3);
       const isFaking = recentThoughts.some(t =>
         t.content && (t.content.includes('mock') || t.content.includes('example data') || t.content.includes('example.com') || t.content.includes('假') || t.content.includes('가상'))
       );
@@ -227,7 +230,7 @@ STOP investigating/searching/browsing! CREATE DELIVERABLES NOW!`;
       pruneThoughts();
 
       // Prune conversation history every 5 cycles to prevent context pollution
-      if (investigationCount % 5 === 0) {
+      if (totalCycles % 5 === 0) {
         const { pruneConversationHistory } = await import("../db/tasks.js");
         pruneConversationHistory('autonomous-learning', 12); // Keep last 12 messages to detect repetition
         logger.info(`[consciousness] Pruned conversation history, keeping last 12 messages`);
@@ -412,7 +415,7 @@ async function executeAutonomousAction(thought: string, forceAction: boolean = f
       let isTooSimilar = false;
 
       for (const recentTask of recentTasks.slice(0, 5)) {
-        const recentKeywords = recentTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
+        const recentKeywords: string[] = recentTask.toLowerCase().match(/[가-힣a-z]{2,}/g) || [];
         const overlap = taskKeywords.filter(k => recentKeywords.includes(k)).length;
         const similarity = overlap / Math.max(taskKeywords.length, 1);
 
@@ -448,7 +451,7 @@ async function executeAutonomousAction(thought: string, forceAction: boolean = f
     }
 
     // Track browser usage (likely investigation)
-    if (event.type === 'tool_use' && event.name === 'browser') {
+    if (event.type === 'tool_call' && event.name === 'browser') {
       hasUsedBrowser = true;
     }
 

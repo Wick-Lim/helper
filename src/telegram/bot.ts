@@ -101,7 +101,10 @@ async function tg(method: string, body?: Record<string, unknown>): Promise<unkno
 async function downloadPhoto(fileId: string, retries = 2): Promise<ImageData | null> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const fileRes = await tg("getFile", { file_id: fileId });
+      const fileRes = (await tg("getFile", { file_id: fileId })) as {
+        ok: boolean;
+        result?: { file_path?: string };
+      };
       if (!fileRes.ok || !fileRes.result?.file_path) return null;
 
       const url = `https://api.telegram.org/file/bot${token}/${fileRes.result.file_path}`;

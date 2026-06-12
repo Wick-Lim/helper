@@ -1,17 +1,18 @@
-// Local LLM client (llama.cpp server)
+// Local LLM client (Ollama, OpenAI-compatible API)
 // Full-featured LLM client with function calling support
 // Replaces Gemini as the primary reasoning engine
 
 import { logger } from "../core/logger.js";
 import { classifyHttpError } from "./retry.js";
-import { parseFunctionCalls } from "./function-parser.ts";
+import { parseFunctionCalls } from "./function-parser.js";
 import { rateLimiters, recordApiUsage } from "../core/ratelimit.js";
+import { MODELS } from "../core/constants.js";
 import type { LLMClient, ChatParams, ChatResponse } from "./types.js";
 import type { ToolDeclaration, ChatMessage } from "../core/types.js";
 
-// Ollama endpoint for DeepSeek R1 Distill Qwen (local reasoning engine)
+// Ollama endpoint for Gemma 4 12B (local reasoning engine)
 const OLLAMA_ENDPOINT = process.env.OLLAMA_ENDPOINT || "http://localhost:11434";
-const MODEL_NAME = "deepseek-r1:7b";
+export const MODEL_NAME = process.env.OLLAMA_MODEL || MODELS.LOCAL;
 
 /**
  * Convert our tool declarations to OpenAI-compatible function format
@@ -56,7 +57,7 @@ function toOpenAIMessages(
       // User messages
       let content = msg.content;
 
-      // Handle images by mentioning them (llama.cpp doesn't support vision yet)
+      // Handle images by mentioning them (this client doesn't forward images to Ollama yet)
       if (msg.images && msg.images.length > 0) {
         content += `\n\n[Note: User provided ${msg.images.length} image(s)]`;
       }
@@ -172,12 +173,12 @@ export function createLocalClient(): LLMClient {
         // Convert messages
         const messages = toOpenAIMessages(params.messages, systemPrompt);
 
-        // Call Modal.com endpoint (or Ollama OpenAI-compatible API)
+        // Call Ollama's OpenAI-compatible API
         const response = await fetch(`${OLLAMA_ENDPOINT}/v1/chat/completions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: "deepseek-r1:7b",
+            model: MODEL_NAME,
             messages,
             temperature: params.temperature ?? 0.1, // Very low temperature for precise function calling
             max_tokens: params.maxTokens ?? 4096,
@@ -288,7 +289,7 @@ export const localLLM = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "deepseek-r1:7b",
+          model: MODEL_NAME,
           messages: params.messages,
           temperature: params.temperature ?? 0.7,
           max_tokens: params.maxTokens ?? 1024,

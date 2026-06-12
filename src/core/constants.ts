@@ -128,8 +128,8 @@ export const GENERATION = {
 
 /** Survival and Growth configuration */
 export const GROWTH = {
-  DAILY_DEBT: 250.0 / 30.0, // $250 per month
-  HOURLY_DEBT: 250.0 / (30 * 24),
+  DAILY_DEBT: 50.0 / 30.0, // $50 per month
+  HOURLY_DEBT: 50.0 / (30 * 24),
   KNOWLEDGE_MAX_ENTRIES: 10000,
   THOUGHTS_RETENTION_DAYS: 7,
   EMBEDDING_DIM: 384,
@@ -150,7 +150,8 @@ export const STUCK_DETECTION = {
 
 /** Environment variable names (for reference) */
 export const ENV_VARS = {
-  LOCAL_LLM_URL: "LOCAL_LLM_URL",
+  OLLAMA_ENDPOINT: "OLLAMA_ENDPOINT", // Ollama server endpoint (default: http://localhost:11434)
+  OLLAMA_MODEL: "OLLAMA_MODEL", // Ollama model tag override (default: gemma4:12b)
   TELEGRAM_TOKEN: "TELEGRAM_TOKEN",
   PORT: "PORT",
   DB_PATH: "DB_PATH",
@@ -159,8 +160,8 @@ export const ENV_VARS = {
 
 /** Default model names */
 export const MODELS = {
-  DEFAULT: "Qwen2.5-7B-Instruct",
-  LOCAL: "Qwen2.5-7B-Instruct",
+  DEFAULT: "gemma4:12b",
+  LOCAL: "gemma4:12b",
 } as const;
 
 /** File extensions and MIME types */

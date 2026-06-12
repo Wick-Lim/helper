@@ -62,9 +62,9 @@ describe("Constants Validation", () => {
   });
 
   describe("RATE_LIMITS", () => {
-    test("should have valid Gemini limits", () => {
-      expect(RATE_LIMITS.GEMINI.REQUESTS_PER_MINUTE).toBe(30);
-      expect(RATE_LIMITS.GEMINI.MAX_TOKENS).toBe(30);
+    test("should have valid local LLM limits", () => {
+      expect(RATE_LIMITS.LOCAL_LLM.REQUESTS_PER_MINUTE).toBe(60);
+      expect(RATE_LIMITS.LOCAL_LLM.MAX_TOKENS).toBe(60);
     });
 
     test("should have valid web request limits", () => {

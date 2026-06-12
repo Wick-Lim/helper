@@ -125,7 +125,7 @@ export class RateLimiter {
 export const rateLimiters = {
   /**
    * Local LLM rate limiter
-   * Prevents overload of local llama-server
+   * Prevents overload of the local Ollama server
    * More permissive than cloud APIs since it's local
    */
   localLLM: new RateLimiter({
@@ -164,7 +164,7 @@ const usageStats: Map<string, UsageStats> = new Map();
 
 /**
  * Record API usage for statistics
- * @param apiName - Name of the API (e.g., "gemini")
+ * @param apiName - Name of the API (e.g., "ollama")
  * @param tokens - Number of tokens consumed
  * @param success - Whether the request was successful
  */

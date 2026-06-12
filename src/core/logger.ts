@@ -36,7 +36,7 @@ const PII_PATTERNS: Array<{ pattern: RegExp; mask: string }> = [
   { pattern: /(password|passwd|pwd)\s*[:=]\s*\S+/gi, mask: '$1: ***REDACTED***' },
   { pattern: /(secret|token|key)\s*[:=]\s*\S+/gi, mask: '$1: ***REDACTED***' },
   { pattern: /(api[_-]?key)\s*[:=]\s*\S+/gi, mask: '$1: ***REDACTED***' },
-  { pattern: /(authorization|auth)\s*[:=]\s*\S+/gi, mask: '$1: ***REDACTED***' },
+  { pattern: /(authorization|auth)\s*[:=]\s*(?:Bearer\s+|Basic\s+)?\S+/gi, mask: '$1: ***REDACTED***' },
   // Long hex strings (often API keys or hashes)
   { pattern: /\b[a-f0-9]{32,}\b/gi, mask: "***HASH***" },
   // Bearer tokens
@@ -64,8 +64,8 @@ export function getRequestContext(): { requestId: string; sessionId?: string } |
 
 export function runWithContext<T>(
   context: { requestId: string; sessionId?: string },
-  fn: () => T | Promise<T>
-): Promise<T> {
+  fn: () => T
+): T {
   return requestContext.run(context, fn);
 }
 

@@ -11,7 +11,7 @@ export const DEFAULTS: Record<string, string> = {
   code_timeout_ms: "60000",
   max_output_chars: "10000",
   verbose: "false",
-  model: "gemini-2.5-flash",
+  model: "gemma4:12b",
   temperature: "0.7",
 };
 
@@ -31,7 +31,8 @@ const VALIDATION_RULES: Record<string, ValidationRule> = {
   code_timeout_ms: { type: "number", min: 1000, max: 600000 },
   max_output_chars: { type: "number", min: 1000, max: 100000 },
   verbose: { type: "boolean" },
-  model: { type: "string", pattern: /^gemini-[a-z0-9.-]+$/i },
+  // Ollama-style model tags: name with optional dots/dashes/underscores/slashes + optional :tag suffix (e.g. "gemma4:12b")
+  model: { type: "string", pattern: /^[a-z0-9][a-z0-9._\-\/]*(:[a-zA-Z0-9._-]+)?$/ },
   temperature: { type: "number", min: 0, max: 2 },
 };
 

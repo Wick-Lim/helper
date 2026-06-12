@@ -17,7 +17,7 @@ const corsHeaders: Record<string, string> = {
 };
 
 let llmClient: LLMClient;
-let serverInstance: Server | null = null;
+let serverInstance: Server<undefined> | null = null;
 
 export function getLLM(): LLMClient {
   return llmClient;
