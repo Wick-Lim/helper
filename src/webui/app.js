@@ -86,6 +86,7 @@ function showView(view) {
   if (view === 'memory') loadMemory();
   if (view === 'tasks') loadTasks();
   if (view === 'stats') loadStats();
+  if (view === 'files') loadFiles();
 }
 
 // Infinite Scroll Handler
@@ -701,7 +702,7 @@ function renderTask(t) {
   const statusColor = t.status === 'completed' ? 'bg-green-100 text-green-800' :
                       t.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-gray-100';
   return `
-    <div class="bg-white p-3 rounded border">
+    <div class="bg-white p-3 rounded border cursor-pointer hover:bg-gray-50 transition" onclick="openTaskDetail(${t.id})">
       <div class="flex justify-between">
         <div class="font-medium">${escapeHtml(t.description)}</div>
         <span class="text-xs px-2 py-1 rounded ${statusColor}">${t.status}</span>
@@ -709,6 +710,236 @@ function renderTask(t) {
       <div class="text-xs text-gray-500 mt-1">${new Date(t.created_at).toLocaleString('ko-KR')}</div>
     </div>
   `;
+}
+
+// Files
+let filesDir = 'workspace';
+let filesCache = [];
+
+function setFilesDir(dir) {
+  filesDir = dir;
+  // Toggle button styles
+  ['workspace', 'screenshots'].forEach(d => {
+    const btn = document.getElementById(`files-dir-${d}`);
+    if (!btn) return;
+    if (d === dir) {
+      btn.className = 'px-4 py-2 bg-blue-500 text-white';
+    } else {
+      btn.className = 'px-4 py-2 bg-white text-gray-600 hover:bg-gray-100';
+    }
+  });
+  loadFiles();
+}
+
+async function loadFiles() {
+  const container = document.getElementById('files-list');
+  if (!container) return;
+
+  container.innerHTML = '<p class="text-gray-500 text-sm">Loading...</p>';
+
+  try {
+    const res = await fetch(`/api/files?dir=${encodeURIComponent(filesDir)}`);
+    const files = await res.json();
+
+    if (!Array.isArray(files) || files.length === 0) {
+      filesCache = [];
+      container.innerHTML = '<p class="text-gray-500 text-sm text-center py-8">No files yet</p>';
+      return;
+    }
+
+    filesCache = files;
+    container.innerHTML = files.map((f, i) => renderFileRow(f, i)).join('');
+  } catch (e) {
+    console.error('[alter] Files load failed:', e);
+    container.innerHTML = '<p class="text-gray-500 text-sm">Failed to load</p>';
+  }
+}
+
+function renderFileRow(f, i) {
+  return `
+    <div class="bg-white p-3 rounded border cursor-pointer hover:bg-gray-50 transition flex items-center justify-between gap-3"
+         onclick="openFileModal(${i})">
+      <div class="min-w-0">
+        <div class="font-medium truncate">${escapeHtml(f.name)}</div>
+        <div class="text-xs text-gray-500 mt-1 truncate">${escapeHtml(f.relpath)}</div>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0 text-xs text-gray-500">
+        <span>${formatSize(f.size)}</span>
+        <span>${new Date(f.modified).toLocaleString('ko-KR')}</span>
+        ${f.ext ? `<span class="px-2 py-1 rounded bg-gray-100 text-gray-700 uppercase">${escapeHtml(f.ext)}</span>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'svg'];
+
+async function openFileModal(index) {
+  const f = filesCache[index];
+  if (!f) return;
+  const path = f.path;
+  const name = f.name;
+  const ext = f.ext;
+
+  const modal = document.getElementById('file-modal');
+  const title = document.getElementById('file-modal-title');
+  const body = document.getElementById('file-modal-body');
+  const download = document.getElementById('file-modal-download');
+  const rawUrl = `/api/files/raw?path=${encodeURIComponent(path)}`;
+
+  title.textContent = name;
+  download.href = rawUrl;
+  download.setAttribute('download', name);
+  body.innerHTML = '<p class="text-gray-500 text-sm">Loading...</p>';
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  if (IMAGE_EXTS.includes((ext || '').toLowerCase())) {
+    body.innerHTML = `<img src="${rawUrl}" alt="${escapeHtml(name)}" class="max-w-full mx-auto rounded">`;
+    return;
+  }
+
+  try {
+    const res = await fetch(rawUrl);
+    if (!res.ok) {
+      body.innerHTML = `<p class="text-red-500 text-sm">Failed to load (HTTP ${res.status})</p>`;
+      return;
+    }
+    const text = await res.text();
+    body.innerHTML = `<pre class="text-sm"><code class="language-${escapeHtml((ext || 'plaintext').toLowerCase())}">${escapeHtml(text)}</code></pre>`;
+    if (window.hljs) {
+      body.querySelectorAll('pre code').forEach(block => {
+        try { hljs.highlightElement(block); } catch {}
+      });
+    }
+  } catch (e) {
+    console.error('[alter] File load failed:', e);
+    body.innerHTML = '<p class="text-red-500 text-sm">Failed to load file</p>';
+  }
+}
+
+function closeFileModal(event) {
+  if (event && event.target !== event.currentTarget) return;
+  const modal = document.getElementById('file-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.getElementById('file-modal-body').innerHTML = '';
+}
+
+// Task Detail
+async function openTaskDetail(id) {
+  const modal = document.getElementById('task-modal');
+  const body = document.getElementById('task-modal-body');
+
+  body.innerHTML = '<p class="text-gray-500 text-sm">Loading...</p>';
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  try {
+    const res = await fetch(`/api/tasks/${id}`);
+    if (!res.ok) {
+      body.innerHTML = `<p class="text-red-500 text-sm">Failed to load (HTTP ${res.status})</p>`;
+      return;
+    }
+    const data = await res.json();
+    body.innerHTML = renderTaskDetail(data.task, data.toolCalls || []);
+  } catch (e) {
+    console.error('[alter] Task detail load failed:', e);
+    body.innerHTML = '<p class="text-red-500 text-sm">Failed to load task</p>';
+  }
+}
+
+function renderTaskDetail(t, toolCalls) {
+  const statusColor = t.status === 'completed' ? 'bg-green-100 text-green-800' :
+                      t.status === 'failed' ? 'bg-red-100 text-red-800' :
+                      t.status === 'running' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800';
+
+  const toolsHtml = toolCalls.length === 0
+    ? '<p class="text-gray-500 text-sm">No tool calls</p>'
+    : toolCalls.map(renderToolCall).join('');
+
+  return `
+    <div class="space-y-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-xs px-2 py-1 rounded ${statusColor}">${escapeHtml(t.status)}</span>
+          <span class="text-xs text-gray-500">${t.iterations || 0} iteration(s)</span>
+          <span class="text-xs text-gray-400">${new Date(t.created_at).toLocaleString('ko-KR')}</span>
+        </div>
+        <div class="font-medium text-gray-800 whitespace-pre-wrap break-words">${escapeHtml(t.description)}</div>
+      </div>
+      ${t.result ? `
+      <div>
+        <div class="text-sm font-semibold text-gray-600 mb-1">Result</div>
+        <pre class="text-sm bg-gray-50 p-3 rounded border overflow-auto whitespace-pre-wrap break-words">${escapeHtml(t.result)}</pre>
+      </div>` : ''}
+      <div>
+        <div class="text-sm font-semibold text-gray-600 mb-2">Tool Calls (${toolCalls.length})</div>
+        <div class="space-y-3">${toolsHtml}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderToolCall(tc) {
+  const ok = tc.success === 1 || tc.success === true;
+  const indicator = ok
+    ? '<span class="text-green-600">✓ success</span>'
+    : '<span class="text-red-600">✗ failed</span>';
+  const ms = tc.execution_time_ms != null ? `${tc.execution_time_ms}ms` : '';
+  const input = truncate(stringifyValue(tc.input), 4000);
+  const output = truncate(stringifyValue(tc.output), 4000);
+
+  return `
+    <div class="border rounded">
+      <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b text-sm">
+        <span class="font-medium text-gray-800">${escapeHtml(tc.tool_name || 'tool')}</span>
+        <span class="flex items-center gap-3 text-xs">${indicator}<span class="text-gray-500">${ms}</span></span>
+      </div>
+      <div class="p-3 space-y-2">
+        <details>
+          <summary class="text-xs text-gray-500 cursor-pointer">Input</summary>
+          <pre class="text-xs bg-gray-50 p-2 rounded mt-1 overflow-auto whitespace-pre-wrap break-words">${escapeHtml(input.text)}</pre>
+          ${input.truncated ? '<div class="text-xs text-gray-400 mt-1">… input truncated</div>' : ''}
+        </details>
+        <details>
+          <summary class="text-xs text-gray-500 cursor-pointer">Output</summary>
+          <pre class="text-xs bg-gray-50 p-2 rounded mt-1 overflow-auto whitespace-pre-wrap break-words">${escapeHtml(output.text)}</pre>
+          ${output.truncated ? '<div class="text-xs text-gray-400 mt-1">… output truncated</div>' : ''}
+        </details>
+      </div>
+    </div>
+  `;
+}
+
+function closeTaskModal(event) {
+  if (event && event.target !== event.currentTarget) return;
+  const modal = document.getElementById('task-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  document.getElementById('task-modal-body').innerHTML = '';
+}
+
+function stringifyValue(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+}
+
+function truncate(text, max) {
+  if (text.length <= max) return { text, truncated: false };
+  return { text: text.slice(0, max), truncated: true };
+}
+
+function formatSize(bytes) {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = bytes / 1024;
+  let i = 0;
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+  return `${size.toFixed(1)} ${units[i]}`;
 }
 
 // Stats

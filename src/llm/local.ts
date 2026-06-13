@@ -115,9 +115,13 @@ function buildFunctionCallingPrompt(tools: ToolDeclaration[]): string {
     })
     .join("\n\n");
 
-  return `You are a tool-calling agent. Respond ONLY with a JSON tool call. No text before or after.
+  return `You can either answer the user directly or call a tool when an action is required.
 
-RESPONSE FORMAT (ONLY THIS):
+- If you can answer directly, reply in plain text in the user's language.
+- If an action is required, respond with exactly one JSON tool call and nothing else.
+- Never mix text and a tool call in the same response.
+
+TOOL CALL FORMAT (when calling a tool, use exactly this):
 \`\`\`json
 {"name": "tool_name", "args": {"param": "value"}}
 \`\`\`
@@ -132,10 +136,7 @@ file: action="write"|"read"|"append"|"list"|"delete", path="/workspace/...", con
 shell: command="...", timeout=number
 memory: action="save"|"search"|"list"|"delete", key="...", value="...", query="...", category="..."
 
-RULES:
-- "예시 데이터", "가상 데이터", "example.com" 사용 금지
-- 설명/가이드/조언 금지, 오직 JSON 도구 호출만
-- 실제 웹사이트를 실제로 방문하고 실제 작업을 수행하세요`;
+When you do use a tool, use a real target and perform the real action — do not invent placeholder data.`;
 }
 
 /**
@@ -229,14 +230,21 @@ export function createLocalClient(): LLMClient {
           }
         }
 
-        // If we found function calls, don't include the raw JSON in text
+        // Build the user-facing text. Prefer the model's actual answer
+        // (content) so chat never surfaces raw reasoning when the model also
+        // answered. Only fall back to thinking as a last resort: when content
+        // is empty AND no tool call was parsed, so the autonomous loop never
+        // gets a silent, empty turn.
         let text: string | undefined;
         if (functionCalls && functionCalls.length > 0) {
-          // Extract any text before the JSON block
-          const beforeJson = effective.split("```")[0].trim();
+          // A tool call was found — strip the JSON block, keep any preamble
+          // (taken from content if present, otherwise the reasoning text the
+          // call was parsed from).
+          const source = content || thinking;
+          const beforeJson = source.split("```")[0].trim();
           text = beforeJson.length > 0 ? beforeJson : undefined;
         } else {
-          text = effective;
+          text = content || thinking;
         }
 
         success = true;

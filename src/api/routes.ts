@@ -13,6 +13,7 @@ import { getSurvivalStats } from "../db/survival.js";
 import { getRecentThoughts, getTimeline } from "../db/growth.js";
 import { interruptLoop } from "../agent/consciousness.js";
 import { INSTANCE_ID } from "../index.js";
+import { listFiles, serveRawFile } from "./files.js";
 import { randomUUID } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { EventEmitter } from "events";
@@ -107,6 +108,19 @@ export async function handleRequest(req: Request): Promise<Response> {
       const offset = parseInt(url.searchParams.get("offset") || "0");
       return json(tasks.getAllTasks(limit, offset));
     }
+
+    // GET /api/tasks/:id
+    const taskMatch = path.match(/^\/api\/tasks\/(\d+)$/);
+    if (taskMatch) {
+      const taskId = parseInt(taskMatch[1]);
+      const task = tasks.getTask(taskId);
+      if (!task) return json({ error: "Task not found" }, 404);
+      return json({ task, toolCalls: tasks.getTaskToolCalls(taskId) });
+    }
+
+    if (path === "/api/files") return json(listFiles(url.searchParams.get("dir") || "workspace"));
+    if (path === "/api/files/raw") return serveRawFile(url.searchParams.get("path") || "");
+
     if (path === "/api/sessions") return json(tasks.getSessions());
 
     if (path === "/api/conversations") {
